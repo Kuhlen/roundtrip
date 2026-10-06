@@ -6,7 +6,7 @@ use app::ui::{KvRow, KvTable, SendStatus};
 use domain::AppError;
 use domain::http::{BodyKind, KeyValue};
 use domain::session::Session;
-use slint::{CloseRequestResponse, Model};
+use slint::{CloseRequestResponse, ComponentHandle, Model};
 use support::{ROOT, build, fakes, kv, opened, p, setup, state, strings, tree_labels, tree_names};
 
 #[test]
@@ -421,4 +421,25 @@ fn opening_another_collection_clears_the_old_response() {
     c.open_collection(Path::new(ROOT));
     assert_eq!(s.get_status_text(), "");
     assert_eq!(s.get_response_raw(), "");
+}
+
+#[test]
+fn escape_cancels_the_confirm_dialog() {
+    let (_f, ui, _c) = opened();
+    let s = state(&ui);
+    s.invoke_row_clicked(1);
+    s.set_url("edited".into());
+    s.invoke_changed();
+    s.invoke_row_clicked(2);
+    assert!(s.get_confirm_open());
+    let escape: slint::SharedString = slint::platform::Key::Escape.into();
+    ui.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+            text: escape.clone(),
+        });
+    ui.window()
+        .dispatch_event(slint::platform::WindowEvent::KeyReleased { text: escape });
+    assert!(!s.get_confirm_open());
+    assert_eq!(s.get_request_name(), "List users");
+    assert!(s.get_dirty());
 }
