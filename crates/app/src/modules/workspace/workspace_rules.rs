@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use domain::AppError;
+use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Node, Protocol};
 use domain::http::{KeyValue, Method, Request};
 use domain::interpolation::interpolate;
@@ -92,7 +93,7 @@ pub fn protocol_name(p: Protocol) -> &'static str {
 // display only, not percent-encoded like the real request; encode if users misread it
 pub fn resolved_url(request: &Request, lookup: impl Fn(&str) -> Option<String>) -> String {
     let mut url = interpolate(&request.url, &lookup);
-    let query: Vec<String> = request
+    let mut query: Vec<String> = request
         .params
         .iter()
         .filter(|p| p.is_active())
@@ -104,11 +105,47 @@ pub fn resolved_url(request: &Request, lookup: impl Fn(&str) -> Option<String>) 
             )
         })
         .collect();
+    if let Some(Auth::ApiKey {
+        key,
+        value,
+        place: ApiKeyPlace::Query,
+    }) = &request.auth
+        && !key.is_empty()
+    {
+        query.push(format!(
+            "{}={}",
+            interpolate(key, &lookup),
+            interpolate(value, &lookup)
+        ));
+    }
     if !query.is_empty() {
         url.push(if url.contains('?') { '&' } else { '?' });
         url.push_str(&query.join("&"));
     }
     url
+}
+
+pub fn auth_label(auth: &Auth) -> String {
+    match auth {
+        Auth::Bearer { .. } => "Bearer".into(),
+        Auth::Basic { .. } => "Basic".into(),
+        Auth::ApiKey { .. } => "API key".into(),
+        Auth::Unsupported(kind) => kind.clone(),
+    }
+}
+
+/// Note under "Inherit" in the Auth tab.
+pub fn inherit_note(collection: Option<&Auth>) -> String {
+    match collection {
+        None => "No auth. The collection has none either.".into(),
+        Some(a) if !a.is_sendable() => {
+            format!(
+                "Uses the collection auth: {}, not supported yet.",
+                auth_label(a)
+            )
+        }
+        Some(a) => format!("Uses the collection auth: {}.", auth_label(a)),
+    }
 }
 
 pub fn interpolate_request(request: &Request, lookup: impl Fn(&str) -> Option<String>) -> Request {
@@ -128,6 +165,21 @@ pub fn interpolate_request(request: &Request, lookup: impl Fn(&str) -> Option<St
         headers: rows(&request.headers),
         body_kind: request.body_kind.clone(),
         body: interpolate(&request.body, &lookup),
+        auth: request.auth.as_ref().map(|a| match a {
+            Auth::Bearer { token } => Auth::Bearer {
+                token: interpolate(token, &lookup),
+            },
+            Auth::Basic { username, password } => Auth::Basic {
+                username: interpolate(username, &lookup),
+                password: interpolate(password, &lookup),
+            },
+            Auth::ApiKey { key, value, place } => Auth::ApiKey {
+                key: interpolate(key, &lookup),
+                value: interpolate(value, &lookup),
+                place: *place,
+            },
+            Auth::Unsupported(kind) => Auth::Unsupported(kind.clone()),
+        }),
     }
 }
 
@@ -152,7 +204,7 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
                 format!("Request timed out after {ms}ms. The server may be slow or unreachable."),
             );
         }
-        // upstream suggests turning off verification; slice 1 has no such switch
+        // upstream suggests turning off verification; no such switch yet
         AppError::Tls(_) => (
             "TLS handshake failed".into(),
             "SSL/TLS handshake failed. Check the server certificate.",
@@ -173,6 +225,18 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
                 format!("Merge conflict in {}", shown.display()),
                 "Fix the conflict markers in your editor, then open the request again.",
             )
+        }
+        AppError::AlreadyExists(name) => {
+            return (
+                format!("{name} already exists"),
+                "Pick another name.".into(),
+            );
+        }
+        AppError::InvalidName(name) => {
+            return (
+                format!("Invalid name \"{name}\""),
+                "Use a non-empty name that does not start with a dot and is not _folder.".into(),
+            );
         }
         AppError::Storage(msg) => return ("Could not read or write a file".into(), msg.clone()),
     };

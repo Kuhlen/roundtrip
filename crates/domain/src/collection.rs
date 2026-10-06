@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::AppError;
+use crate::auth::Auth;
 use crate::http::{Method, Request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -58,6 +59,8 @@ pub struct Collection {
     pub name: String,
     pub path: PathBuf,
     pub children: Vec<Node>,
+    /// `defaults.auth` in `.apiark/apiark.yaml`
+    pub auth: Option<Auth>,
 }
 
 pub trait CollectionStore {
@@ -65,4 +68,13 @@ pub trait CollectionStore {
     fn read_request(&self, file: &Path) -> Result<Request, AppError>;
     /// Patches only method/url/params/headers/body; every other key stays.
     fn save_request(&self, file: &Path, request: &Request) -> Result<(), AppError>;
+    /// Sets or removes only `defaults.auth`; Unsupported is left as the file has it.
+    fn save_collection_auth(&self, root: &Path, auth: Option<&Auth>) -> Result<(), AppError>;
+    /// `<slug>.yaml` with name/method/url; AlreadyExists on collision.
+    fn create_request(&self, dir: &Path, name: &str) -> Result<PathBuf, AppError>;
+    fn create_folder(&self, dir: &Path, name: &str) -> Result<PathBuf, AppError>;
+    /// Renames on disk and in the parent `_folder.yaml` order; requests also get `name:`.
+    fn rename(&self, path: &Path, new_name: &str) -> Result<PathBuf, AppError>;
+    /// Permanent: no trash.
+    fn delete(&self, path: &Path) -> Result<(), AppError>;
 }

@@ -11,6 +11,7 @@ use std::time::Duration;
 use app::modules::workspace::workspace_controller::{Deps, WorkspaceController};
 use app::ui::{AppWindow, KvRow, WorkspaceState};
 use domain::AppError;
+use domain::auth::Auth;
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::environment::{Environment, EnvironmentStore, Scope};
 use domain::http::{BodyKind, HttpSender, KeyValue, Method, Request, Response};
@@ -34,6 +35,7 @@ pub fn tree() -> Collection {
     Collection {
         name: "httpbin-demo".into(),
         path: PathBuf::from(ROOT),
+        auth: None,
         children: vec![
             Node::Folder {
                 name: "users".into(),
@@ -60,17 +62,35 @@ pub fn tree() -> Collection {
     }
 }
 
-#[derive(Default)]
 pub struct FakeCollections {
+    pub tree: RefCell<Collection>,
     pub files: RefCell<HashMap<PathBuf, Result<Request, AppError>>>,
     pub saved: RefCell<Vec<(PathBuf, Request)>>,
     pub save_error: RefCell<Option<AppError>>,
+    /// returned by every tree edit and save_collection_auth
+    pub edit_error: RefCell<Option<AppError>>,
+    pub auth_saves: RefCell<Vec<Option<Auth>>>,
+    pub deleted: RefCell<Vec<PathBuf>>,
+}
+
+impl Default for FakeCollections {
+    fn default() -> Self {
+        Self {
+            tree: RefCell::new(tree()),
+            files: RefCell::default(),
+            saved: RefCell::default(),
+            save_error: RefCell::default(),
+            edit_error: RefCell::default(),
+            auth_saves: RefCell::default(),
+            deleted: RefCell::default(),
+        }
+    }
 }
 
 impl CollectionStore for FakeCollections {
     fn load(&self, dir: &Path) -> Result<Collection, AppError> {
         if dir == Path::new(ROOT) {
-            Ok(tree())
+            Ok(self.tree.borrow().clone())
         } else {
             Err(AppError::NotACollection(dir.display().to_string()))
         }
@@ -95,6 +115,187 @@ impl CollectionStore for FakeCollections {
             .borrow_mut()
             .insert(file.to_path_buf(), Ok(request.clone()));
         Ok(())
+    }
+
+    fn save_collection_auth(&self, _root: &Path, auth: Option<&Auth>) -> Result<(), AppError> {
+        if let Some(e) = self.edit_error.borrow().clone() {
+            return Err(e);
+        }
+        self.auth_saves.borrow_mut().push(auth.cloned());
+        self.tree.borrow_mut().auth = auth.cloned();
+        Ok(())
+    }
+
+    fn create_request(&self, dir: &Path, name: &str) -> Result<PathBuf, AppError> {
+        let path = dir.join(format!("{}.yaml", slug(name)));
+        self.insert(
+            dir,
+            Node::Request {
+                name: name.trim().into(),
+                method: Method::Get,
+                protocol: Protocol::Http,
+                path: path.clone(),
+            },
+        )?;
+        self.files
+            .borrow_mut()
+            .insert(path.clone(), Ok(Request::default()));
+        Ok(path)
+    }
+
+    fn create_folder(&self, dir: &Path, name: &str) -> Result<PathBuf, AppError> {
+        let path = dir.join(name.trim());
+        self.insert(
+            dir,
+            Node::Folder {
+                name: name.trim().into(),
+                path: path.clone(),
+                children: vec![],
+            },
+        )?;
+        Ok(path)
+    }
+
+    fn rename(&self, path: &Path, new_name: &str) -> Result<PathBuf, AppError> {
+        self.check()?;
+        let dir = path.parent().expect("parent");
+        let target = if path.extension().is_some() {
+            dir.join(format!("{}.yaml", slug(new_name)))
+        } else {
+            dir.join(new_name.trim())
+        };
+        if target != path && find(&self.tree.borrow().children, &target) {
+            return Err(AppError::AlreadyExists(
+                target.file_name().expect("name").to_string_lossy().into(),
+            ));
+        }
+        {
+            let mut tree = self.tree.borrow_mut();
+            let siblings = children_mut(&mut tree.children, Path::new(ROOT), dir).expect("dir");
+            let node = siblings
+                .iter_mut()
+                .find(|n| node_path(n) == path)
+                .expect("node");
+            rebase(node, path, &target);
+            match node {
+                Node::Folder { name, .. } | Node::Request { name, .. } => {
+                    *name = new_name.trim().into()
+                }
+            }
+        }
+        let moved: Vec<_> = self
+            .files
+            .borrow()
+            .keys()
+            .filter(|k| k.starts_with(path))
+            .cloned()
+            .collect();
+        for old in moved {
+            let value = self.files.borrow_mut().remove(&old).expect("file");
+            let new = if old == path {
+                target.clone()
+            } else {
+                target.join(old.strip_prefix(path).expect("prefix"))
+            };
+            self.files.borrow_mut().insert(new, value);
+        }
+        Ok(target)
+    }
+
+    fn delete(&self, path: &Path) -> Result<(), AppError> {
+        self.check()?;
+        let dir = path.parent().expect("parent");
+        let mut tree = self.tree.borrow_mut();
+        children_mut(&mut tree.children, Path::new(ROOT), dir)
+            .expect("dir")
+            .retain(|n| node_path(n) != path);
+        self.files.borrow_mut().retain(|k, _| !k.starts_with(path));
+        self.deleted.borrow_mut().push(path.to_path_buf());
+        Ok(())
+    }
+}
+
+impl FakeCollections {
+    fn check(&self) -> Result<(), AppError> {
+        match self.edit_error.borrow().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    fn insert(&self, dir: &Path, node: Node) -> Result<(), AppError> {
+        self.check()?;
+        let path = node_path(&node).to_path_buf();
+        let mut tree = self.tree.borrow_mut();
+        if find(&tree.children, &path) {
+            return Err(AppError::AlreadyExists(
+                path.file_name().expect("name").to_string_lossy().into(),
+            ));
+        }
+        children_mut(&mut tree.children, Path::new(ROOT), dir)
+            .expect("dir")
+            .push(node);
+        Ok(())
+    }
+}
+
+fn slug(name: &str) -> String {
+    name.trim()
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn node_path(n: &Node) -> &Path {
+    match n {
+        Node::Folder { path, .. } | Node::Request { path, .. } => path,
+    }
+}
+
+fn find(nodes: &[Node], target: &Path) -> bool {
+    nodes.iter().any(|n| {
+        node_path(n) == target
+            || matches!(n, Node::Folder { children, .. } if find(children, target))
+    })
+}
+
+fn children_mut<'a>(
+    nodes: &'a mut Vec<Node>,
+    here: &Path,
+    dir: &Path,
+) -> Option<&'a mut Vec<Node>> {
+    if dir == here {
+        return Some(nodes);
+    }
+    for n in nodes.iter_mut() {
+        if let Node::Folder { path, children, .. } = n
+            && dir.starts_with(&*path)
+        {
+            let here = path.clone();
+            return children_mut(children, &here, dir);
+        }
+    }
+    None
+}
+
+fn rebase(node: &mut Node, old: &Path, new: &Path) {
+    // join("") would add a trailing slash
+    let moved = |p: &Path| {
+        if p == old {
+            new.to_path_buf()
+        } else {
+            new.join(p.strip_prefix(old).expect("prefix"))
+        }
+    };
+    match node {
+        Node::Request { path, .. } => *path = moved(path.as_path()),
+        Node::Folder { path, children, .. } => {
+            *path = moved(path.as_path());
+            for c in children {
+                rebase(c, old, new);
+            }
+        }
     }
 }
 
@@ -122,7 +323,10 @@ impl EnvironmentStore for FakeEnvironments {
 
     fn resolve(&self, _collection: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
         Ok(match name {
-            "dev" => HashMap::from([("baseUrl".to_string(), "https://httpbin.org".to_string())]),
+            "dev" => HashMap::from([
+                ("baseUrl".to_string(), "https://httpbin.org".to_string()),
+                ("token".to_string(), "secret".to_string()),
+            ]),
             _ => HashMap::new(),
         })
     }
@@ -300,4 +504,8 @@ pub fn kv(model: &ModelRc<KvRow>) -> Vec<(String, String, bool)> {
         .iter()
         .map(|r| (r.key.to_string(), r.value.to_string(), r.enabled))
         .collect()
+}
+
+pub fn set_collection_auth(f: &Fakes, auth: Option<Auth>) {
+    f.collections.tree.borrow_mut().auth = auth;
 }

@@ -1,8 +1,12 @@
 export enum SendStatus { idle, sending, done, failed }
 export enum StatusClass { ok, warn, err }
 export enum KvTable { params, headers }
-export struct TreeRow { depth: int, name: string, label: string, folder: bool, expanded: bool, active: bool, dirty: bool }
+export enum DialogKind { unsaved, delete }
+export struct TreeRow { depth: int, name: string, label: string, folder: bool, expanded: bool, active: bool, dirty: bool, editing: bool }
 export struct KvRow { enabled: bool, key: string, value: string }
+// kind: 0 inherit (request) / none (collection), 1 bearer, 2 basic, 3 api key
+// place: 0 header, 1 query; unsupported: upstream type name, "" = editable
+export struct AuthFields { kind: int, token: string, username: string, password: string, key: string, value: string, place: int, unsupported: string }
 
 // in = pushed from Rust; in-out = form state owned by Slint, read by Rust
 export global WorkspaceState {
@@ -14,6 +18,8 @@ export global WorkspaceState {
     in property <[string]> environments;
     in-out property <int> environment-index;
     in property <[TreeRow]> tree;
+    // tree index of the active request, -1 = none (F2 / Del target)
+    in property <int> active-row: -1;
 
     // request
     in property <bool> has-request;
@@ -37,6 +43,11 @@ export global WorkspaceState {
     in property <string> unsupported-body;
     // protocol name, "" = sendable
     in property <string> unsupported-protocol;
+    in-out property <AuthFields> request-auth;
+    // note shown under "Inherit"
+    in property <string> inherited-auth;
+    // effective auth (own or inherited) is unsupported
+    in property <bool> auth-blocked;
     in property <bool> dirty;
     in-out property <int> editor-tab;
 
@@ -61,10 +72,14 @@ export global WorkspaceState {
     in property <string> banner-title;
     in property <string> banner-hint;
     in property <bool> confirm-open;
+    in property <bool> settings-open;
+    in-out property <AuthFields> settings-auth;
     in property <string> confirm-name;
     in property <string> confirm-file;
+    in property <DialogKind> dialog-kind;
+    in property <bool> confirm-folder;
 
-    out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "";
+    out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked;
 
     callback open-collection();
     callback environment-selected();
@@ -78,4 +93,15 @@ export global WorkspaceState {
     callback confirm-save();
     callback confirm-discard();
     callback confirm-cancel();
+    callback open-settings();
+    callback save-settings();
+    callback close-settings();
+    // int = tree row index, -1 = collection root
+    callback new-request(int);
+    callback new-folder(int);
+    callback rename-start(int);
+    callback rename-commit(string);
+    callback rename-cancel();
+    callback delete-row(int);
+    callback confirm-delete();
 }

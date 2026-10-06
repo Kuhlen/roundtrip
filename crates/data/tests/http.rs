@@ -4,6 +4,7 @@ use std::thread::{self, JoinHandle};
 
 use data::http::{ReqwestSender, pretty_json};
 use domain::AppError;
+use domain::auth::{ApiKeyPlace, Auth};
 use domain::http::{BodyKind, HttpSender, KeyValue, Method, Request};
 
 /// One-shot local server: answers `response`, returns the raw request, lowercased.
@@ -189,4 +190,123 @@ fn pretty_json_keeps_key_order() {
     );
     assert_eq!(pretty_json("<xml/>"), None);
     assert_eq!(pretty_json(""), None);
+}
+
+fn with_auth(url: String, auth: Auth) -> Request {
+    Request {
+        auth: Some(auth),
+        ..get(url)
+    }
+}
+
+#[test]
+fn bearer_sets_authorization() {
+    let (base, server) = serve(reply(b"", ""));
+    ReqwestSender::new()
+        .unwrap()
+        .send(&with_auth(
+            base,
+            Auth::Bearer {
+                token: "abc".into(),
+            },
+        ))
+        .unwrap();
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .contains("authorization: bearer abc\r\n")
+    );
+}
+
+#[test]
+fn basic_is_base64_of_user_and_password() {
+    let (base, server) = serve(reply(b"", ""));
+    let auth = Auth::Basic {
+        username: "user".into(),
+        password: "pass".into(),
+    };
+    ReqwestSender::new()
+        .unwrap()
+        .send(&with_auth(base, auth))
+        .unwrap();
+    // base64("user:pass") = dXNlcjpwYXNz, lowercased by serve()
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .contains("authorization: basic dxnlcjpwyxnz\r\n")
+    );
+}
+
+#[test]
+fn api_key_goes_to_header_or_query() {
+    let (base, server) = serve(reply(b"", ""));
+    let auth = Auth::ApiKey {
+        key: "X-Key".into(),
+        value: "k1".into(),
+        place: ApiKeyPlace::Header,
+    };
+    ReqwestSender::new()
+        .unwrap()
+        .send(&with_auth(base, auth))
+        .unwrap();
+    assert!(server.join().unwrap().contains("x-key: k1\r\n"));
+
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = with_auth(
+        format!("{base}/s"),
+        Auth::ApiKey {
+            key: "api_key".into(),
+            value: "k2".into(),
+            place: ApiKeyPlace::Query,
+        },
+    );
+    req.params = vec![KeyValue::new("q", "1")];
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    assert!(server.join().unwrap().starts_with("get /s?q=1&api_key=k2 "));
+}
+
+#[test]
+fn user_authorization_header_wins() {
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = with_auth(
+        base,
+        Auth::Bearer {
+            token: "abc".into(),
+        },
+    );
+    req.headers = vec![KeyValue::new("Authorization", "Custom x")];
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert_eq!(raw.matches("authorization:").count(), 1);
+    assert!(raw.contains("authorization: custom x\r\n"));
+}
+
+#[test]
+fn api_key_with_empty_name_is_skipped() {
+    let (base, server) = serve(reply(b"", ""));
+    let auth = Auth::ApiKey {
+        key: "".into(),
+        value: "v".into(),
+        place: ApiKeyPlace::Header,
+    };
+    let resp = ReqwestSender::new()
+        .unwrap()
+        .send(&with_auth(base, auth))
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(resp.status, 200);
+}
+
+#[test]
+fn unsupported_auth_is_never_sent() {
+    let req = with_auth(
+        "http://127.0.0.1:9".into(),
+        Auth::Unsupported("oauth2".into()),
+    );
+    assert!(matches!(
+        ReqwestSender::new().unwrap().send(&req),
+        Err(AppError::Request(m)) if m == "oauth2 auth is not supported"
+    ));
 }

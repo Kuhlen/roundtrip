@@ -1,2 +1,6 @@
 name: httpbin-demo
 version: 1
+defaults:
+  auth:
+    type: bearer
+    token: '{{token}}'

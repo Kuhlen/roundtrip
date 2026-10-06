@@ -5,9 +5,10 @@ use std::time::Duration;
 
 use app::ui::{AppWindow, SendStatus, StatusClass};
 use domain::AppError;
+use domain::auth::Auth;
 use domain::http::KeyValue;
 use slint::{ComponentHandle, Timer, TimerMode};
-use support::{build, fakes, open_with_env, state};
+use support::{build, fakes, open_with_env, set_collection_auth, state};
 
 /// Run the event loop until the worker's result lands (5 s cap).
 fn settle(ui: &AppWindow) {
@@ -33,6 +34,12 @@ fn send_shows_sending_then_done_then_failed() {
     i_slint_backend_testing::init_integration_test_with_system_time();
     let f = fakes();
     let (ui, c) = build(&f);
+    set_collection_auth(
+        &f,
+        Some(Auth::Bearer {
+            token: "{{token}}".into(),
+        }),
+    );
     open_with_env(&ui, &c);
     let s = state(&ui);
     s.invoke_row_clicked(1);
@@ -54,6 +61,13 @@ fn send_shows_sending_then_done_then_failed() {
         let sent = f.sender.requests.lock().unwrap();
         assert_eq!(sent[0].url, "https://httpbin.org/get");
         assert_eq!(sent[0].params, vec![KeyValue::new("page", "2")]);
+        assert_eq!(
+            sent[0].auth,
+            Some(Auth::Bearer {
+                token: "secret".into()
+            }),
+            "collection auth inherited and interpolated"
+        );
     }
     assert_eq!(
         s.get_url(),

@@ -1,0 +1,7 @@
+name: Basic auth
+method: GET
+url: '{{baseUrl}}/basic-auth/ayu/s3cret'
+auth:
+  type: basic
+  username: ayu
+  password: s3cret

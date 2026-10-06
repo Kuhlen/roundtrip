@@ -13,8 +13,15 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - Edit method, URL, params, headers and JSON/XML/raw bodies; `{{var}}` and `{{$uuid}}`-style variables.
 - Send with Ctrl+Enter; status, time, size, pretty JSON, headers.
 - Save with Ctrl+S; unsaved edits are marked ● and guarded by a Save / Discard / Cancel dialog.
-- Not yet: auth helpers, new requests/folders, cookies, history, tabs, scripts, other protocols.
-  Write auth as an `Authorization: Bearer {{token}}` header meanwhile.
+- Not yet: cookies, history, tabs, scripts, other protocols.
+
+## Slice 2
+
+- Auth tab: Bearer, Basic, API key (header or query), or Inherit the collection's default auth
+  (⚙ Collection settings). Other ApiArk auth types are kept on save but block Send.
+- A header you write yourself (`Authorization`, or the API key's name) wins over auth.
+- "+" in the sidebar creates a request or folder at the root; right-click a row for New request,
+  New folder, Rename (F2) and Delete (Del). Delete is permanent.
 
 ## Known limits
 
@@ -23,6 +30,7 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - A personal environment with the same name as a shared one is shadowed.
 - No file watcher: external edits after loading are overwritten on save.
 - The previous response stays visible when switching request.
+- Folder auth in _folder.yaml is ignored when sending (ApiArk does the same).
 
 ## Build
 

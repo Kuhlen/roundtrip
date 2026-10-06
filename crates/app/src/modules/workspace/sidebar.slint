@@ -1,11 +1,18 @@
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
 import { WorkspaceState, TreeRow } from "workspace_state.slint";
-import { Btn, Select } from "controls.slint";
+import { Btn, Field, Select } from "controls.slint";
 
 component TreeLine inherits Rectangle {
     in property <TreeRow> item;
     callback clicked();
+    callback new-request();
+    callback new-folder();
+    callback rename();
+    callback delete();
+    callback rename-commit(string);
+    callback rename-cancel();
+    callback done();
     height: 28px;
     background: root.item.active ? Theme.accent-soft : touch.has-hover ? #ffffff08 : transparent;
     if root.item.active: Rectangle {
@@ -36,21 +43,79 @@ component TreeLine inherits Rectangle {
             horizontal-alignment: right;
             vertical-alignment: center;
         }
-        Text {
+        if !root.item.editing: Text {
             horizontal-stretch: 1;
             text: root.item.name;
             color: root.item.folder ? Theme.muted : Theme.text;
             vertical-alignment: center;
             overflow: elide;
         }
+        if root.item.editing: FocusScope {
+            horizontal-stretch: 1;
+            // Esc cancels; Enter commits through accepted
+            capture-key-pressed(e) => {
+                if e.text == Key.Escape {
+                    root.rename-cancel();
+                    root.done();
+                    return accept;
+                }
+                reject
+            }
+            Field {
+                y: (parent.height - self.height) / 2;
+                width: 100%;
+                height: 24px;
+                text: root.item.name;
+                accepted => {
+                    root.rename-commit(self.text);
+                    root.done();
+                }
+                // clicking elsewhere ends the rename
+                changed has-focus => {
+                    if !self.has-focus {
+                        root.rename-cancel();
+                    }
+                }
+                init => {
+                    self.focus();
+                    self.select-all();
+                }
+            }
+        }
         if root.item.dirty: Text { text: "●"; color: Theme.accent; font-size: 10px; vertical-alignment: center; }
     }
     touch := TouchArea {
+        // disabled while renaming so clicks reach the field
+        enabled: !root.item.editing;
         clicked => { root.clicked(); }
+    }
+    // TouchArea grabs every press, so menu is a later sibling, not its parent. Non-right presses fall through
+    ContextMenuArea {
+        enabled: !root.item.editing;
+        Menu {
+            MenuItem {
+                title: "New request";
+                activated => { root.new-request(); }
+            }
+            MenuItem {
+                title: "New folder";
+                activated => { root.new-folder(); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Rename";
+                activated => { root.rename(); }
+            }
+            MenuItem {
+                title: "Delete";
+                activated => { root.delete(); }
+            }
+        }
     }
 }
 
 export component Sidebar inherits Rectangle {
+    callback focus-tree();
     background: Theme.side;
     if !WorkspaceState.has-collection: VerticalLayout {
         alignment: center;
@@ -90,11 +155,40 @@ export component Sidebar inherits Rectangle {
                 }
                 VerticalLayout {
                     alignment: center;
-                    Btn {
-                        text: "Open…";
-                        small: true;
-                        ghost: true;
-                        clicked => { WorkspaceState.open-collection(); }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        Btn {
+                            text: "⚙";
+                            small: true;
+                            ghost: true;
+                            clicked => { WorkspaceState.open-settings(); }
+                        }
+                        add-menu := ContextMenuArea {
+                            width: plus.preferred-width;
+                            height: plus.preferred-height;
+                            Menu {
+                                MenuItem {
+                                    title: "New request";
+                                    activated => { WorkspaceState.new-request(-1); }
+                                }
+                                MenuItem {
+                                    title: "New folder";
+                                    activated => { WorkspaceState.new-folder(-1); }
+                                }
+                            }
+                            plus := Btn {
+                                text: "+";
+                                small: true;
+                                ghost: true;
+                                clicked => { add-menu.show({ x: 0px, y: self.height + 4px }); }
+                            }
+                        }
+                        Btn {
+                            text: "Open…";
+                            small: true;
+                            ghost: true;
+                            clicked => { WorkspaceState.open-collection(); }
+                        }
                     }
                 }
             }
@@ -114,7 +208,17 @@ export component Sidebar inherits Rectangle {
             ListView {
                 for row[i] in WorkspaceState.tree: TreeLine {
                     item: row;
-                    clicked => { WorkspaceState.row-clicked(i); }
+                    clicked => {
+                        WorkspaceState.row-clicked(i);
+                        root.focus-tree();
+                    }
+                    new-request => { WorkspaceState.new-request(i); }
+                    new-folder => { WorkspaceState.new-folder(i); }
+                    rename => { WorkspaceState.rename-start(i); }
+                    delete => { WorkspaceState.delete-row(i); }
+                    rename-commit(text) => { WorkspaceState.rename-commit(text); }
+                    rename-cancel => { WorkspaceState.rename-cancel(); }
+                    done => { root.focus-tree(); }
                 }
             }
         }

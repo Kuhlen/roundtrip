@@ -1,9 +1,10 @@
 import { Theme } from "../../theme.slint";
-import { WorkspaceState } from "workspace_state.slint";
+import { WorkspaceState, DialogKind } from "workspace_state.slint";
 import { Btn } from "controls.slint";
 
-// Save is the default button
+// Save is the default for unsaved edits; Cancel for delete
 export component ConfirmDialog inherits Rectangle {
+    property <bool> is-delete: WorkspaceState.dialog-kind == DialogKind.delete;
     background: Theme.scrim;
     // scrim swallows clicks
     TouchArea { }
@@ -32,39 +33,56 @@ export component ConfirmDialog inherits Rectangle {
                 padding: 20px;
                 spacing: 10px;
                 Text {
-                    text: "Save changes to \"" + WorkspaceState.confirm-name + "\"?";
+                    text: root.is-delete
+                        ? "Delete \"" + WorkspaceState.confirm-name + "\"?"
+                        : "Save changes to \"" + WorkspaceState.confirm-name + "\"?";
                     font-size: 15px;
                     font-weight: 600;
                     color: Theme.text;
                     wrap: word-wrap;
                 }
                 Text {
-                    text: "Your edits to " + WorkspaceState.confirm-file + " are lost if you don't save them.";
+                    text: root.is-delete
+                        ? "This deletes " + WorkspaceState.confirm-file + (WorkspaceState.confirm-folder ? " and everything in it" : "") + " permanently."
+                        : "Your edits to " + WorkspaceState.confirm-file + " are lost if you don't save them.";
                     color: Theme.muted;
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
                     padding-top: 8px;
                     spacing: 8px;
-                    Btn {
+                    cancel := Btn {
                         text: "Cancel";
                         ghost: true;
                         clicked => { WorkspaceState.confirm-cancel(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    Btn {
+                    if !root.is-delete: Btn {
                         text: "Discard";
                         text-color: Theme.err;
                         clicked => { WorkspaceState.confirm-discard(); }
                     }
-                    save := Btn {
-                        text: "Save";
-                        primary: true;
-                        clicked => { WorkspaceState.confirm-save(); }
+                    main := Btn {
+                        text: root.is-delete ? "Delete" : "Save";
+                        primary: !root.is-delete;
+                        text-color: Theme.err;
+                        clicked => {
+                            if root.is-delete {
+                                WorkspaceState.confirm-delete();
+                            } else {
+                                WorkspaceState.confirm-save();
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    init => { save.focus(); }
+    init => {
+        if root.is-delete {
+            cancel.focus();
+        } else {
+            main.focus();
+        }
+    }
 }

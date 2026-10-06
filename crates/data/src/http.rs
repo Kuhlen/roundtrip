@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use domain::AppError;
+use domain::auth::{ApiKeyPlace, Auth};
 use domain::http::{BodyKind, HttpSender, KeyValue, Request, Response};
 use reqwest::Url;
 use reqwest::blocking::Client;
@@ -31,20 +32,52 @@ impl HttpSender for ReqwestSender {
         if let BodyKind::Unsupported(kind) = &request.body_kind {
             return Err(AppError::Request(format!("{kind} body is not supported")));
         }
-        let url = build_url(&request.url, &request.params)?;
+        if let Some(Auth::Unsupported(kind)) = &request.auth {
+            return Err(AppError::Request(format!("{kind} auth is not supported")));
+        }
+        let mut params = request.params.clone();
+        if let Some(Auth::ApiKey {
+            key,
+            value,
+            place: ApiKeyPlace::Query,
+        }) = &request.auth
+            && !key.is_empty()
+        {
+            params.push(KeyValue::new(key, value));
+        }
+        let url = build_url(&request.url, &params)?;
         let method = reqwest::Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|e| AppError::Request(e.to_string()))?;
         let mut builder = self.client.request(method, url);
         for h in request.headers.iter().filter(|h| h.is_active()) {
             builder = builder.header(&h.key, &h.value);
         }
-        if let Some(content_type) = request.body_kind.content_type() {
-            // upstream always appends, duplicating a user-set Content-Type
-            let user_set = request
+        // upstream appends a second Authorization; a header the user wrote wins
+        let user_set = |name: &str| {
+            request
                 .headers
                 .iter()
-                .any(|h| h.is_active() && h.key.eq_ignore_ascii_case("content-type"));
-            if !user_set {
+                .any(|h| h.is_active() && h.key.eq_ignore_ascii_case(name))
+        };
+        match &request.auth {
+            Some(Auth::Bearer { token }) if !user_set("authorization") => {
+                builder = builder.bearer_auth(token);
+            }
+            Some(Auth::Basic { username, password }) if !user_set("authorization") => {
+                builder = builder.basic_auth(username, Some(password));
+            }
+            Some(Auth::ApiKey {
+                key,
+                value,
+                place: ApiKeyPlace::Header,
+            }) if !key.is_empty() && !user_set(key) => {
+                builder = builder.header(key, value);
+            }
+            _ => {}
+        }
+        if let Some(content_type) = request.body_kind.content_type() {
+            // upstream always appends, duplicating a user-set Content-Type
+            if !user_set("content-type") {
                 builder = builder.header("Content-Type", content_type);
             }
             builder = builder.body(request.body.clone());

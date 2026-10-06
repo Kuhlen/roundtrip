@@ -1,0 +1,119 @@
+import { Theme } from "../../theme.slint";
+import { AuthFields } from "workspace_state.slint";
+import { Btn, Field, Note, Select } from "controls.slint";
+
+component Caption inherits Text {
+    font-size: 11px;
+    letter-spacing: 0.66px;
+    color: Theme.faint;
+}
+
+component LabeledField inherits VerticalLayout {
+    in property <string> label;
+    in-out property <string> text;
+    callback edited();
+    spacing: 4px;
+    Caption { text: root.label; }
+    Field {
+        text <=> root.text;
+        edited => { root.edited(); }
+    }
+}
+
+// Auth tab and Collection settings; kind order = select order
+export component AuthForm inherits VerticalLayout {
+    in-out property <AuthFields> auth;
+    // "Inherit" for a request, "None" for the collection
+    in property <string> none-label;
+    // shown when kind == 0; "" = no note
+    in property <string> none-note;
+    in property <bool> settings-link;
+    callback changed();
+    callback open-settings();
+    spacing: 12px;
+    alignment: start;
+
+    if root.auth.unsupported != "": Note {
+        text: root.auth.unsupported + " auth: not supported yet. Saving leaves it as it is in the file.";
+    }
+    if root.auth.unsupported == "": VerticalLayout {
+        spacing: 4px;
+        Caption { text: "TYPE"; }
+        Select {
+            width: 160px;
+            model: [root.none-label, "Bearer", "Basic", "API key"];
+            current-index <=> root.auth.kind;
+            selected => { root.changed(); }
+        }
+    }
+    if root.auth.unsupported == "" && root.auth.kind == 0 && root.none-note != "": HorizontalLayout {
+        spacing: 8px;
+        Note { horizontal-stretch: 1; text: root.none-note; }
+        if root.settings-link: VerticalLayout {
+            alignment: center;
+            Btn {
+                text: "Collection settings…";
+                small: true;
+                ghost: true;
+                clicked => { root.open-settings(); }
+            }
+        }
+    }
+    if root.auth.unsupported == "" && root.auth.kind == 1: LabeledField {
+        label: "TOKEN";
+        text <=> root.auth.token;
+        edited => { root.changed(); }
+    }
+    if root.auth.unsupported == "" && root.auth.kind == 2: HorizontalLayout {
+        spacing: 10px;
+        LabeledField {
+            label: "USERNAME";
+            text <=> root.auth.username;
+            edited => { root.changed(); }
+        }
+        // plain field: the value sits in plain YAML anyway
+        LabeledField {
+            label: "PASSWORD";
+            text <=> root.auth.password;
+            edited => { root.changed(); }
+        }
+    }
+    if root.auth.unsupported == "" && root.auth.kind == 3: VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            LabeledField {
+                label: "KEY";
+                text <=> root.auth.key;
+                edited => { root.changed(); }
+            }
+            LabeledField {
+                label: "VALUE";
+                text <=> root.auth.value;
+                edited => { root.changed(); }
+            }
+        }
+        VerticalLayout {
+            spacing: 4px;
+            Caption { text: "ADD TO"; }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 6px;
+                Btn {
+                    text: "Header";
+                    small: true;
+                    primary: root.auth.place == 0;
+                    ghost: root.auth.place != 0;
+                    clicked => { root.auth.place = 0; root.changed(); }
+                }
+                Btn {
+                    text: "Query";
+                    small: true;
+                    primary: root.auth.place == 1;
+                    ghost: root.auth.place != 1;
+                    clicked => { root.auth.place = 1; root.changed(); }
+                }
+            }
+        }
+    }
+}

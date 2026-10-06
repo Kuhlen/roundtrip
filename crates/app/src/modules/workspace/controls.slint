@@ -90,6 +90,8 @@ export component Field inherits Rectangle {
     // disabled key/value row; Text has no strikethrough, so draw one
     in property <bool> struck;
     callback edited();
+    callback accepted();
+    out property <bool> has-focus: input.has-focus;
     property <length> pad: root.framed ? 12px : 10px;
     height: root.framed ? 34px : 32px;
     border-radius: root.framed ? 6px : 0;
@@ -143,6 +145,9 @@ export component Field inherits Rectangle {
             edited => {
                 root.edited();
             }
+            accepted => {
+                root.accepted();
+            }
         }
         if root.struck: Rectangle {
             y: parent.height / 2;
@@ -151,6 +156,10 @@ export component Field inherits Rectangle {
             height: 1px;
             background: Theme.faint;
         }
+    }
+
+    public function select-all() {
+        input.select-all();
     }
 }
 
@@ -411,5 +420,20 @@ export component Tab inherits Rectangle {
     }
     TouchArea {
         clicked => { root.clicked(); }
+    }
+}
+
+// solid border: Slint has no dashed borders
+export component Note inherits Rectangle {
+    in property <string> text;
+    border-width: 1px;
+    border-color: Theme.line;
+    border-radius: 6px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        Text { text: root.text; color: Theme.muted; wrap: word-wrap; }
     }
 }

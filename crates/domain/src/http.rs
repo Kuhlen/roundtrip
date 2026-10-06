@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::AppError;
+use crate::auth::Auth;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Method {
@@ -120,6 +121,8 @@ pub struct Request {
     pub headers: Vec<KeyValue>,
     pub body_kind: BodyKind,
     pub body: String,
+    /// None: inherit the collection's
+    pub auth: Option<Auth>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

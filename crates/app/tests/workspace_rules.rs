@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, flatten, format_size, interpolate_request, resolved_url, row_label,
+    RowKind, error_text, flatten, format_size, inherit_note, interpolate_request, resolved_url,
+    row_label,
 };
 use domain::AppError;
+use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Node, Protocol};
 use domain::http::{BodyKind, KeyValue, Method, Request};
 
@@ -123,6 +125,7 @@ fn interpolate_request_fills_every_text_field() {
         }],
         body_kind: BodyKind::Json,
         body: r#"{"id":"{{id}}"}"#.into(),
+        auth: None,
     };
     let out = interpolate_request(
         &req,
@@ -147,6 +150,7 @@ fn interpolate_request_fills_every_text_field() {
             }],
             body_kind: BodyKind::Json,
             body: r#"{"id":"7"}"#.into(),
+            auth: None,
         }
     );
 }
@@ -182,4 +186,81 @@ fn sizes_are_human_readable() {
     assert_eq!(format_size(412), "412 B");
     assert_eq!(format_size(1536), "1.5 KB");
     assert_eq!(format_size(2 * 1024 * 1024), "2.0 MB");
+}
+
+#[test]
+fn interpolate_request_fills_auth_fields() {
+    let vars = HashMap::from([("t".to_string(), "secret".to_string())]);
+    let lookup = |n: &str| vars.get(n).cloned();
+    let with = |auth| Request {
+        auth: Some(auth),
+        ..Request::default()
+    };
+    let out = interpolate_request(
+        &with(Auth::Bearer {
+            token: "{{t}}".into(),
+        }),
+        lookup,
+    );
+    assert_eq!(
+        out.auth,
+        Some(Auth::Bearer {
+            token: "secret".into()
+        })
+    );
+    let out = interpolate_request(
+        &with(Auth::ApiKey {
+            key: "X-{{t}}".into(),
+            value: "{{t}}".into(),
+            place: ApiKeyPlace::Query,
+        }),
+        lookup,
+    );
+    assert_eq!(
+        out.auth,
+        Some(Auth::ApiKey {
+            key: "X-secret".into(),
+            value: "secret".into(),
+            place: ApiKeyPlace::Query
+        })
+    );
+}
+
+#[test]
+fn name_errors_have_text() {
+    let (title, _) = error_text(&AppError::AlreadyExists("ping.yaml".into()), None);
+    assert_eq!(title, "ping.yaml already exists");
+    let (title, _) = error_text(&AppError::InvalidName(".env".into()), None);
+    assert_eq!(title, "Invalid name \".env\"");
+}
+
+#[test]
+fn resolved_url_shows_a_query_api_key() {
+    let req = Request {
+        url: "http://h/p".into(),
+        params: vec![KeyValue::new("a", "1")],
+        auth: Some(Auth::ApiKey {
+            key: "k".into(),
+            value: "v".into(),
+            place: ApiKeyPlace::Query,
+        }),
+        ..Request::default()
+    };
+    assert_eq!(resolved_url(&req, |_| None), "http://h/p?a=1&k=v");
+}
+
+#[test]
+fn inherit_note_names_the_collection_auth() {
+    assert_eq!(
+        inherit_note(None),
+        "No auth. The collection has none either."
+    );
+    assert_eq!(
+        inherit_note(Some(&Auth::Bearer { token: "t".into() })),
+        "Uses the collection auth: Bearer."
+    );
+    assert_eq!(
+        inherit_note(Some(&Auth::Unsupported("oauth2".into()))),
+        "Uses the collection auth: oauth2, not supported yet."
+    );
 }

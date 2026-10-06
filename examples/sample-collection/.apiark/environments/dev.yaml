@@ -2,3 +2,4 @@ name: dev
 variables:
   baseUrl: https://httpbin.org
   pageSize: '20'
+  token: dev-token

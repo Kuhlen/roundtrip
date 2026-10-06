@@ -18,6 +18,10 @@ pub enum AppError {
     NotACollection(String),
     #[error("merge conflict in {0}")]
     MergeConflict(String),
+    #[error("already exists: {0}")]
+    AlreadyExists(String),
+    #[error("invalid name: {0}")]
+    InvalidName(String),
     #[error("storage error: {0}")]
     Storage(String),
 }

@@ -1,22 +1,8 @@
 import { ListView, TextEdit } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
 import { WorkspaceState, KvRow, KvTable } from "workspace_state.slint";
-import { Btn, Checkbox, Field, Select, Tab } from "controls.slint";
-
-// solid border: Slint has no dashed borders
-component Note inherits Rectangle {
-    in property <string> text;
-    border-width: 1px;
-    border-color: Theme.line;
-    border-radius: 6px;
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        Text { text: root.text; color: Theme.muted; wrap: word-wrap; }
-    }
-}
+import { Btn, Checkbox, Field, Note, Select, Tab } from "controls.slint";
+import { AuthForm } from "auth_form.slint";
 
 component KvTableView inherits Rectangle {
     in property <[KvRow]> rows;
@@ -217,6 +203,12 @@ export component RequestEditor inherits Rectangle {
                     active: WorkspaceState.editor-tab == 2;
                     clicked => { WorkspaceState.editor-tab = 2; }
                 }
+                Tab {
+                    text: "Auth";
+                    count: WorkspaceState.request-auth.kind != 0 || WorkspaceState.request-auth.unsupported != "" ? "•" : "";
+                    active: WorkspaceState.editor-tab == 3;
+                    clicked => { WorkspaceState.editor-tab = 3; }
+                }
                 Rectangle { horizontal-stretch: 1; }
                 if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": VerticalLayout {
                     alignment: center;
@@ -265,6 +257,20 @@ export component RequestEditor inherits Rectangle {
             padding: 14px;
             padding-top: 12px;
             Note { text: WorkspaceState.unsupported-body + " body: not supported yet. Saving leaves it as it is in the file."; }
+        }
+        if WorkspaceState.editor-tab == 3: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 14px;
+            padding-top: 12px;
+            AuthForm {
+                auth <=> WorkspaceState.request-auth;
+                none-label: "Inherit";
+                none-note: WorkspaceState.inherited-auth;
+                settings-link: true;
+                changed => { WorkspaceState.changed(); }
+                open-settings => { WorkspaceState.open-settings(); }
+            }
         }
         if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": TextEdit {
             vertical-stretch: 1;

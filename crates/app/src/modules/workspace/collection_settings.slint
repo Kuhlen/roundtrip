@@ -1,0 +1,59 @@
+import { Theme } from "../../theme.slint";
+import { WorkspaceState } from "workspace_state.slint";
+import { Btn } from "controls.slint";
+import { AuthForm } from "auth_form.slint";
+
+// modal; Save/Cancel, so no dirty state of its own
+export component CollectionSettings inherits Rectangle {
+    background: Theme.scrim;
+    // scrim swallows clicks
+    TouchArea { }
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                WorkspaceState.close-settings();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: 460px;
+            height: col.preferred-height;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.line;
+            border-radius: 10px;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #00000080;
+            col := VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                Text { text: "Collection settings"; font-size: 15px; font-weight: 600; color: Theme.text; }
+                Text { text: "DEFAULT AUTH"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; }
+                AuthForm {
+                    auth <=> WorkspaceState.settings-auth;
+                    none-label: "None";
+                }
+                HorizontalLayout {
+                    padding-top: 6px;
+                    spacing: 8px;
+                    alignment: end;
+                    Btn {
+                        text: "Cancel";
+                        ghost: true;
+                        clicked => { WorkspaceState.close-settings(); }
+                    }
+                    save := Btn {
+                        text: "Save";
+                        primary: true;
+                        clicked => { WorkspaceState.save-settings(); }
+                    }
+                }
+            }
+        }
+    }
+    init => { save.focus(); }
+}
