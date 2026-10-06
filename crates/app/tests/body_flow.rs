@@ -5,25 +5,16 @@ use std::rc::Rc;
 use app::modules::workspace::workspace_controller::WorkspaceController;
 use app::ui::{AppWindow, KvRow, KvTable};
 use domain::collection::Protocol;
-use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
+use domain::http::{Body, FormField, KeyValue, TextKind};
 use slint::Model;
-use support::{Fakes, PICKED, open_with_env, p, set_health, setup, state};
-
-fn post(body: Body) -> Request {
-    Request {
-        method: Method::Post,
-        url: "{{baseUrl}}/post".into(),
-        body,
-        ..Request::default()
-    }
-}
+use support::{Fakes, PICKED, open_with_env, p, post, row_of, set_health, setup, state};
 
 /// Collection open, Health check (row 3) holds `body` and is selected.
 fn opened_with(body: Body, protocol: Protocol) -> (Fakes, AppWindow, Rc<WorkspaceController>) {
     let (f, ui, c) = setup();
     set_health(&f, post(body), protocol);
     open_with_env(&ui, &c);
-    state(&ui).invoke_row_clicked(3);
+    state(&ui).invoke_row_clicked(row_of(&ui, "Health check"));
     (f, ui, c)
 }
 

@@ -2,12 +2,12 @@ import "../assets/fonts/IBMPlexSans[wdth,wght].ttf";
 import "../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../assets/fonts/JetBrainsMono-Bold.ttf";
 import { Theme } from "theme.slint";
-import { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, DialogKind } from "modules/workspace/workspace_state.slint";
+import { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, DialogKind, TabItem } from "modules/workspace/workspace_state.slint";
 import { KvRow } from "snippets/kv_table.slint";
 import { AuthFields } from "snippets/auth_form.slint";
 import { WorkspaceView } from "modules/workspace/workspace_view.slint";
 
-export { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, KvRow, AuthFields, DialogKind }
+export { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, KvRow, AuthFields, DialogKind, TabItem }
 
 export component AppWindow inherits Window {
     title: "Roundtrip";

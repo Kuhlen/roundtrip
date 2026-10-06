@@ -4,21 +4,25 @@ import { AuthFields } from "../../snippets/auth_form.slint";
 export enum SendStatus { idle, sending, done, failed }
 export enum StatusClass { ok, warn, err }
 export enum KvTable { params, headers, form }
-export enum DialogKind { unsaved, delete }
-export struct TreeRow { depth: int, name: string, label: string, folder: bool, expanded: bool, active: bool, dirty: bool, editing: bool }
+export enum DialogKind { untitled, delete }
+export struct TabItem { title: string, dirty: bool, pinned: bool, active: bool, untitled: bool }
+export struct TreeRow { depth: int, name: string, label: string, folder: bool, collection: bool, expanded: bool, active: bool, dirty: bool, editing: bool }
 
 // in = pushed from Rust; in-out = form state owned by Slint, read by Rust
 export global WorkspaceState {
     // sidebar
     in property <bool> has-collection;
-    in property <string> collection-name;
-    in property <string> collection-path;
     // [0] = "No environment"
     in property <[string]> environments;
     in-out property <int> environment-index;
     in property <[TreeRow]> tree;
     // tree index of the active request, -1 = none (F2 / Del target)
     in property <int> active-row: -1;
+
+    // tabs
+    in property <[TabItem]> tabs;
+    // index into tabs, -1 = none
+    in property <int> active-tab: -1;
 
     // request
     in property <bool> has-request;
@@ -91,6 +95,17 @@ export global WorkspaceState {
     in property <DialogKind> dialog-kind;
     in property <bool> confirm-folder;
 
+    // save as dialog
+    in property <bool> save-as-open;
+    in-out property <string> save-as-name;
+    // open collection names; empty = Save disabled
+    in property <[string]> save-as-collections;
+    in-out property <int> save-as-collection-index;
+    // "/", "/ users", "/ users / admin"
+    in property <[string]> save-as-folders;
+    in-out property <int> save-as-folder-index;
+    in property <string> save-as-error;
+
     out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked && self.body-error == "";
 
     callback open-collection();
@@ -104,13 +119,20 @@ export global WorkspaceState {
     callback send();
     callback save();
     callback dismiss-banner();
-    callback confirm-save();
-    callback confirm-discard();
     callback confirm-cancel();
+    // untitled dialog
+    callback confirm-save-as();
+    callback confirm-discard();
+    callback save-as-confirm();
+    callback save-as-cancel();
+    callback save-as-collection-selected();
     callback open-settings();
     callback save-settings();
     callback close-settings();
-    // int = tree row index, -1 = collection root
+    // int = collection row index
+    callback collection-settings(int);
+    callback close-collection(int);
+    // int = tree row index, -1 = first collection
     callback new-request(int);
     callback new-folder(int);
     callback rename-start(int);
@@ -118,4 +140,16 @@ export global WorkspaceState {
     callback rename-cancel();
     callback delete-row(int);
     callback confirm-delete();
+    // int = tab index
+    callback tab-clicked(int);
+    callback tab-close(int);
+    callback tab-new();
+    callback tab-duplicate(int);
+    callback tab-pin(int);
+    callback tab-close-others(int);
+    callback tab-close-all();
+    // from, to
+    callback tab-moved(int, int);
+    // worker queued a send result
+    callback response-ready();
 }

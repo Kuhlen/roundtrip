@@ -8,13 +8,14 @@ use slint::{ComponentHandle, Model, VecModel};
 use super::body_fields::body_count;
 use crate::modules::workspace::auth_fields::{auth_fields, auth_from_fields};
 use crate::modules::workspace::sidebar::set_method;
-use crate::modules::workspace::workspace_controller::{Active, WorkspaceController};
+use crate::modules::workspace::tabs::tab::ResponseView;
+use crate::modules::workspace::workspace_controller::WorkspaceController;
 use crate::modules::workspace::workspace_rules;
-use crate::ui::{AuthFields, KvRow, KvTable, SendStatus, WorkspaceState};
+use crate::ui::{AuthFields, KvRow, KvTable, WorkspaceState};
 
 impl WorkspaceController {
     pub(crate) fn clear_request(&self, s: &WorkspaceState) {
-        *self.active.borrow_mut() = None;
+        self.active.set(None);
         *self.pending.borrow_mut() = None;
         s.set_has_request(false);
         s.set_crumb("".into());
@@ -29,10 +30,8 @@ impl WorkspaceController {
         s.set_param_count(0);
         s.set_header_count(0);
         s.set_dirty(false);
-        // in-flight Send keeps Send disabled until its result lands
-        if s.get_send_status() != SendStatus::Sending {
-            s.set_send_status(SendStatus::Idle);
-        }
+        // a late reply goes to its tab, never to this panel
+        ResponseView::default().show(s);
         s.set_confirm_open(false);
         s.set_request_auth(AuthFields::default());
         s.set_inherited_auth("".into());
@@ -41,66 +40,75 @@ impl WorkspaceController {
         self.headers.set_vec(vec![placeholder()]);
     }
 
-    /// Form ← saved request. Last response stays: a late reply never lands on a reset panel.
-    pub(in crate::modules::workspace) fn fill(&self, mut active: Active) {
-        let ui = self.ui();
-        let s = ui.global::<WorkspaceState>();
-        let gql = match &active.saved.body {
+    /// Form ← the active tab's saved request.
+    pub(in crate::modules::workspace) fn fill_saved(&self, s: &WorkspaceState) {
+        let Some((mut saved, protocol)) = self.with_active(|t| (t.saved.clone(), t.protocol))
+        else {
+            return;
+        };
+        let gql = match &saved.body {
             Body::Text {
                 kind: TextKind::Json,
                 text,
-            } if active.protocol == Protocol::Graphql => (self.deps.graphql_parse)(text),
+            } if protocol == Protocol::Graphql => (self.deps.graphql_parse)(text),
             _ => None,
         };
         // compare against the layout save writes, so opening is never dirty
         if let Some(text) = gql.as_ref().and_then(|g| (self.deps.graphql_json)(g).ok()) {
-            active.saved.body = Body::Text {
+            saved.body = Body::Text {
                 kind: TextKind::Json,
                 text,
             };
+            self.with_active_mut(|t| t.saved = saved.clone());
         }
-        let r = &active.saved;
-        s.set_has_request(true);
+        let r = &saved;
         s.set_method_index(Method::ALL.iter().position(|m| *m == r.method).unwrap_or(0) as i32);
         s.set_url(r.url.as_str().into());
-        self.fill_body(&s, &r.body, gql.as_ref());
-        let protocol = if active.protocol.is_sendable() {
+        self.fill_body(s, &r.body, gql.as_ref());
+        let protocol = if protocol.is_sendable() {
             ""
         } else {
-            workspace_rules::protocol_name(active.protocol)
+            workspace_rules::protocol_name(protocol)
         };
         s.set_unsupported_protocol(protocol.into());
         s.set_request_auth(auth_fields(r.auth.as_ref()));
         self.params.set_vec(with_placeholder(&r.params));
         self.headers.set_vec(with_placeholder(&r.headers));
-        *self.active.borrow_mut() = Some(active);
-        self.show_header();
-        s.set_dirty(false);
-        self.refresh_tree();
-        self.changed();
     }
 
     /// Name, breadcrumb and file of the active request.
     pub(crate) fn show_header(&self) {
-        let Some(active) = self.active.borrow().clone() else {
+        let Some((title, path)) =
+            self.with_active(|t| (t.title.clone(), t.file.as_ref().map(|f| f.path.clone())))
+        else {
             return;
         };
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
-        let root = self.root().unwrap_or_default();
-        let rel = active.path.strip_prefix(&root).unwrap_or(&active.path);
+        let Some(path) = path else {
+            s.set_request_name(title.as_str().into());
+            s.set_crumb("".into());
+            s.set_request_file("not saved".into());
+            return;
+        };
+        let root = self.tab_root().unwrap_or_default();
+        let rel = path.strip_prefix(&root).unwrap_or(&path);
         let crumb = rel
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| format!("{} /", p.display()));
-        s.set_request_name(active.name.as_str().into());
+        s.set_request_name(title.as_str().into());
         s.set_crumb(crumb.unwrap_or_default().into());
         s.set_request_file(rel.display().to_string().into());
     }
 
     /// Form → Request. Unsupported bodies come from the file, never from the form.
-    pub(in crate::modules::workspace) fn form(&self, s: &WorkspaceState, a: &Active) -> Request {
-        let body = self.form_body(s, &a.saved.body);
+    pub(in crate::modules::workspace) fn form(
+        &self,
+        s: &WorkspaceState,
+        saved: &Request,
+    ) -> Request {
+        let body = self.form_body(s, &saved.body);
         Request {
             method: usize::try_from(s.get_method_index())
                 .ok()
@@ -111,7 +119,7 @@ impl WorkspaceController {
             params: kv_rows(&self.params),
             headers: kv_rows(&self.headers),
             body,
-            auth: auth_from_fields(&s.get_request_auth(), a.saved.auth.as_ref()),
+            auth: auth_from_fields(&s.get_request_auth(), saved.auth.as_ref()),
         }
     }
 
@@ -119,14 +127,10 @@ impl WorkspaceController {
         self.ui().global::<WorkspaceState>().get_dirty()
     }
 
-    /// Form request with the auth Send will use: its own, else the collection's.
+    /// Form request with the auth Send will use: its own, else its collection's.
     pub(crate) fn outgoing(&self, form: Request) -> Request {
-        let collection = self.collection.borrow();
-        let auth = effective(
-            form.auth.as_ref(),
-            collection.as_ref().and_then(|c| c.auth.as_ref()),
-        )
-        .cloned();
+        let inherited = self.tab_root().and_then(|r| self.auth_of(&r));
+        let auth = effective(form.auth.as_ref(), inherited.as_ref()).cloned();
         Request { auth, ..form }
     }
 
@@ -134,16 +138,22 @@ impl WorkspaceController {
     pub(crate) fn changed(&self) {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
-        let current = self.active.borrow().as_ref().map(|a| {
-            let form = self.form(&s, a);
+        let current = self.with_active(|t| {
+            let form = self.form(&s, &t.saved);
             let error = self.body_error(&s);
-            let dirty = form != a.saved || error.is_some();
+            let dirty = form != t.saved || error.is_some();
             (form, dirty, error)
         });
         let Some((form, dirty, error)) = current else {
             s.set_resolved_url("".into());
             return;
         };
+        let flipped = self
+            .with_active_mut(|t| std::mem::replace(&mut t.dirty, dirty) != dirty)
+            .unwrap_or(false);
+        if flipped {
+            self.push_tabs();
+        }
         s.set_body_error(
             error
                 .map(|e| format!("Variables: {e}"))
@@ -153,12 +163,11 @@ impl WorkspaceController {
         s.set_param_count(active_count(&form.params));
         s.set_header_count(active_count(&form.headers));
         s.set_body_count(body_count(&form.body));
-        let collection_auth = self
-            .collection
-            .borrow()
-            .as_ref()
-            .and_then(|c| c.auth.clone());
-        s.set_inherited_auth(workspace_rules::inherit_note(collection_auth.as_ref()).into());
+        let note = match self.tab_root() {
+            Some(root) => workspace_rules::inherit_note(self.auth_of(&root).as_ref()),
+            None => workspace_rules::inherit_note_untitled(),
+        };
+        s.set_inherited_auth(note.into());
         let out = self.outgoing(form);
         s.set_auth_blocked(out.auth.as_ref().is_some_and(|a| !a.is_sendable()));
         s.set_resolved_url(workspace_rules::resolved_url(&out, |n| self.lookup(n)).into());
@@ -166,6 +175,7 @@ impl WorkspaceController {
             s.set_dirty(dirty);
             self.refresh_tree();
         }
+        self.schedule_autosave();
     }
 
     fn kv_model(&self, table: KvTable) -> &VecModel<KvRow> {
@@ -200,9 +210,11 @@ impl WorkspaceController {
         self.changed();
     }
 
+    /// false when not written: failed, invalid body, or Save as opened instead.
     pub(crate) fn save(&self) -> bool {
+        let untitled = self.with_active(|t| t.file.is_none()).unwrap_or(false);
         // rewriting an unchanged file clobbers outside edits and YAML comments
-        if !self.is_dirty() {
+        if !untitled && !self.is_dirty() {
             return true;
         }
         let ui = self.ui();
@@ -211,22 +223,23 @@ impl WorkspaceController {
             self.banner(&e);
             return false;
         }
+        if untitled {
+            self.open_save_as();
+            return false;
+        }
         let target = self
-            .active
-            .borrow()
-            .as_ref()
-            .map(|a| (a.path.clone(), self.form(&s, a)));
+            .with_active(|t| Some((t.file.as_ref()?.path.clone(), self.form(&s, &t.saved))))
+            .flatten();
         let Some((path, form)) = target else {
             return false;
         };
         match self.deps.collections.save_request(&path, &form) {
             Ok(()) => {
-                if let Some(c) = self.collection.borrow_mut().as_mut() {
+                // paths are unique across collections
+                for c in self.collections.borrow_mut().iter_mut() {
                     set_method(&mut c.children, &path, form.method);
                 }
-                if let Some(a) = self.active.borrow_mut().as_mut() {
-                    a.saved = form;
-                }
+                self.with_active_mut(|t| t.saved = form);
                 self.changed();
                 true
             }

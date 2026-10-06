@@ -24,6 +24,8 @@ thread_local! {
 }
 
 pub const ROOT: &str = "/c";
+/// second collection: one request, environments dev + qa
+pub const ORDERS: &str = "/d";
 
 pub fn p(rel: &str) -> PathBuf {
     Path::new(ROOT).join(rel)
@@ -67,14 +69,30 @@ pub fn tree() -> Collection {
     }
 }
 
+pub fn orders() -> Collection {
+    Collection {
+        name: "orders-api".into(),
+        path: PathBuf::from(ORDERS),
+        auth: None,
+        children: vec![Node::Request {
+            name: "Orders".into(),
+            method: Method::Get,
+            protocol: Protocol::Http,
+            path: Path::new(ORDERS).join("orders.yaml"),
+        }],
+    }
+}
+
 pub struct FakeCollections {
     pub tree: RefCell<Collection>,
+    pub orders: RefCell<Collection>,
     pub files: RefCell<HashMap<PathBuf, Result<Request, AppError>>>,
     pub saved: RefCell<Vec<(PathBuf, Request)>>,
     pub save_error: RefCell<Option<AppError>>,
     /// returned by every tree edit and save_collection_auth
     pub edit_error: RefCell<Option<AppError>>,
-    pub auth_saves: RefCell<Vec<Option<Auth>>>,
+    /// (collection root, auth)
+    pub auth_saves: RefCell<Vec<(PathBuf, Option<Auth>)>>,
     pub deleted: RefCell<Vec<PathBuf>>,
 }
 
@@ -82,6 +100,7 @@ impl Default for FakeCollections {
     fn default() -> Self {
         Self {
             tree: RefCell::new(tree()),
+            orders: RefCell::new(orders()),
             files: RefCell::default(),
             saved: RefCell::default(),
             save_error: RefCell::default(),
@@ -96,6 +115,8 @@ impl CollectionStore for FakeCollections {
     fn load(&self, dir: &Path) -> Result<Collection, AppError> {
         if dir == Path::new(ROOT) {
             Ok(self.tree.borrow().clone())
+        } else if dir == Path::new(ORDERS) {
+            Ok(self.orders.borrow().clone())
         } else {
             Err(AppError::NotACollection(dir.display().to_string()))
         }
@@ -122,12 +143,19 @@ impl CollectionStore for FakeCollections {
         Ok(())
     }
 
-    fn save_collection_auth(&self, _root: &Path, auth: Option<&Auth>) -> Result<(), AppError> {
+    fn save_collection_auth(&self, root: &Path, auth: Option<&Auth>) -> Result<(), AppError> {
         if let Some(e) = self.edit_error.borrow().clone() {
             return Err(e);
         }
-        self.auth_saves.borrow_mut().push(auth.cloned());
-        self.tree.borrow_mut().auth = auth.cloned();
+        self.auth_saves
+            .borrow_mut()
+            .push((root.to_path_buf(), auth.cloned()));
+        let tree = if root == Path::new(ORDERS) {
+            &self.orders
+        } else {
+            &self.tree
+        };
+        tree.borrow_mut().auth = auth.cloned();
         Ok(())
     }
 
@@ -310,7 +338,7 @@ pub struct FakeEnvironments {
 }
 
 impl EnvironmentStore for FakeEnvironments {
-    fn list(&self, _collection: &Path) -> Result<Vec<Environment>, AppError> {
+    fn list(&self, collection: &Path) -> Result<Vec<Environment>, AppError> {
         if let Some(e) = self.list_error.borrow().clone() {
             return Err(e);
         }
@@ -320,13 +348,24 @@ impl EnvironmentStore for FakeEnvironments {
             variables: HashMap::new(),
             secrets: vec![],
         };
+        if collection == Path::new(ORDERS) {
+            return Ok(vec![env("qa", Scope::Shared), env("dev", Scope::Shared)]);
+        }
         Ok(vec![
             env("dev", Scope::Shared),
             env("mine", Scope::Personal),
         ])
     }
 
-    fn resolve(&self, _collection: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
+    fn resolve(&self, collection: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
+        if collection == Path::new(ORDERS) {
+            return Ok(match name {
+                "dev" => {
+                    HashMap::from([("baseUrl".to_string(), "https://orders.test".to_string())])
+                }
+                _ => HashMap::new(),
+            });
+        }
         Ok(match name {
             "dev" => HashMap::from([
                 ("baseUrl".to_string(), "https://httpbin.org".to_string()),
@@ -432,6 +471,13 @@ pub fn fakes() -> Fakes {
                 ..Request::default()
             }),
         ),
+        (
+            Path::new(ORDERS).join("orders.yaml"),
+            Ok(Request {
+                url: "{{baseUrl}}/orders".into(),
+                ..Request::default()
+            }),
+        ),
     ]);
     Fakes {
         collections: Rc::new(FakeCollections {
@@ -532,4 +578,44 @@ pub fn set_health(f: &Fakes, request: Request, protocol: Protocol) {
     {
         *shown = protocol;
     }
+}
+
+/// Tree index of the row called `name`.
+pub fn row_of(ui: &AppWindow, name: &str) -> i32 {
+    state(ui)
+        .get_tree()
+        .iter()
+        .position(|r| r.name == name)
+        .unwrap_or_else(|| panic!("no tree row {name:?}")) as i32
+}
+
+pub fn post(body: Body) -> Request {
+    Request {
+        method: Method::Post,
+        url: "{{baseUrl}}/post".into(),
+        body,
+        ..Request::default()
+    }
+}
+
+/// opened(), Health check selected and holding a GraphQL body
+pub fn opened_graphql() -> (Fakes, AppWindow, Rc<WorkspaceController>) {
+    let (f, ui, c) = setup();
+    let body = Body::Text {
+        kind: TextKind::Json,
+        text: r#"{"query":"{ me }"}"#.into(),
+    };
+    set_health(&f, post(body), Protocol::Graphql);
+    open_with_env(&ui, &c);
+    state(&ui).invoke_row_clicked(row_of(&ui, "Health check"));
+    (f, ui, c)
+}
+
+/// opened_graphql() with a plain HTTP `body` instead
+pub fn opened_with_body(body: Body) -> (Fakes, AppWindow, Rc<WorkspaceController>) {
+    let (f, ui, c) = setup();
+    set_health(&f, post(body), Protocol::Http);
+    open_with_env(&ui, &c);
+    state(&ui).invoke_row_clicked(row_of(&ui, "Health check"));
+    (f, ui, c)
 }

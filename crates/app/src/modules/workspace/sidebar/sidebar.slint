@@ -12,6 +12,8 @@ component TreeLine inherits Rectangle {
     callback new-folder();
     callback rename();
     callback delete();
+    callback settings();
+    callback close();
     callback rename-commit(string);
     callback rename-cancel();
     callback done();
@@ -22,12 +24,13 @@ component TreeLine inherits Rectangle {
         width: 2px;
         background: Theme.accent;
     }
+    property <bool> branch: root.item.folder || root.item.collection;
     HorizontalLayout {
         // method labels right-aligned at 38 px + 20 px per level, chevron at 8 px
-        padding-left: root.item.folder ? 8px + root.item.depth * 20px : root.item.depth * 20px;
+        padding-left: root.branch ? 8px + root.item.depth * 20px : root.item.depth * 20px;
         padding-right: 12px;
         spacing: 8px;
-        if root.item.folder: Text {
+        if root.branch: Text {
             width: 12px;
             text: root.item.expanded ? "▾" : "▸";
             color: Theme.faint;
@@ -35,7 +38,7 @@ component TreeLine inherits Rectangle {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
-        if !root.item.folder: Text {
+        if !root.branch: Text {
             width: 38px;
             text: root.item.label;
             font-family: Theme.mono;
@@ -49,6 +52,7 @@ component TreeLine inherits Rectangle {
             horizontal-stretch: 1;
             text: root.item.name;
             color: root.item.folder ? Theme.muted : Theme.text;
+            font-weight: root.item.collection ? 600 : 400;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -104,11 +108,19 @@ component TreeLine inherits Rectangle {
                 activated => { root.new-folder(); }
             }
             MenuSeparator { }
-            MenuItem {
+            if root.item.collection: MenuItem {
+                title: "Collection settings…";
+                activated => { root.settings(); }
+            }
+            if root.item.collection: MenuItem {
+                title: "Close collection";
+                activated => { root.close(); }
+            }
+            if !root.item.collection: MenuItem {
                 title: "Rename";
                 activated => { root.rename(); }
             }
-            MenuItem {
+            if !root.item.collection: MenuItem {
                 title: "Delete";
                 activated => { root.delete(); }
             }
@@ -119,29 +131,7 @@ component TreeLine inherits Rectangle {
 export component Sidebar inherits Rectangle {
     callback focus-tree();
     background: Theme.side;
-    if !WorkspaceState.has-collection: VerticalLayout {
-        alignment: center;
-        padding: 24px;
-        spacing: 8px;
-        Text { text: "No collection open"; color: Theme.muted; font-size: 14px; horizontal-alignment: center; }
-        Text {
-            text: "Open a folder that contains .apiark/apiark.yaml";
-            color: Theme.faint;
-            font-size: 12px;
-            horizontal-alignment: center;
-            wrap: word-wrap;
-        }
-        HorizontalLayout {
-            alignment: center;
-            padding-top: 8px;
-            Btn {
-                text: "Open collection…";
-                primary: true;
-                clicked => { WorkspaceState.open-collection(); }
-            }
-        }
-    }
-    if WorkspaceState.has-collection: VerticalLayout {
+    VerticalLayout {
         VerticalLayout {
             padding-left: 14px;
             padding-right: 14px;
@@ -149,49 +139,42 @@ export component Sidebar inherits Rectangle {
             padding-bottom: 12px;
             spacing: 10px;
             HorizontalLayout {
-                spacing: 8px;
-                VerticalLayout {
+                spacing: 4px;
+                Text {
                     horizontal-stretch: 1;
-                    Text { text: WorkspaceState.collection-name; font-size: 14px; font-weight: 600; color: Theme.text; overflow: elide; }
-                    Text { text: WorkspaceState.collection-path; font-family: Theme.mono; font-size: 11px; color: Theme.faint; overflow: elide; }
+                    text: "COLLECTIONS";
+                    font-size: 11px;
+                    letter-spacing: 0.66px;
+                    color: Theme.faint;
+                    vertical-alignment: center;
                 }
-                VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Btn {
-                            text: "⚙";
-                            small: true;
-                            ghost: true;
-                            clicked => { WorkspaceState.open-settings(); }
+                add-menu := ContextMenuArea {
+                    width: plus.preferred-width;
+                    height: plus.preferred-height;
+                    enabled: WorkspaceState.has-collection;
+                    Menu {
+                        MenuItem {
+                            title: "New request";
+                            activated => { WorkspaceState.new-request(-1); }
                         }
-                        add-menu := ContextMenuArea {
-                            width: plus.preferred-width;
-                            height: plus.preferred-height;
-                            Menu {
-                                MenuItem {
-                                    title: "New request";
-                                    activated => { WorkspaceState.new-request(-1); }
-                                }
-                                MenuItem {
-                                    title: "New folder";
-                                    activated => { WorkspaceState.new-folder(-1); }
-                                }
-                            }
-                            plus := Btn {
-                                text: "+";
-                                small: true;
-                                ghost: true;
-                                clicked => { add-menu.show({ x: 0px, y: self.height + 4px }); }
-                            }
-                        }
-                        Btn {
-                            text: "Open…";
-                            small: true;
-                            ghost: true;
-                            clicked => { WorkspaceState.open-collection(); }
+                        MenuItem {
+                            title: "New folder";
+                            activated => { WorkspaceState.new-folder(-1); }
                         }
                     }
+                    plus := Btn {
+                        text: "+";
+                        small: true;
+                        ghost: true;
+                        enabled: WorkspaceState.has-collection;
+                        clicked => { add-menu.show({ x: 0px, y: self.height + 4px }); }
+                    }
+                }
+                Btn {
+                    text: "Open…";
+                    small: true;
+                    ghost: true;
+                    clicked => { WorkspaceState.open-collection(); }
                 }
             }
             Text { text: "ENVIRONMENT"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; }
@@ -199,11 +182,24 @@ export component Sidebar inherits Rectangle {
                 model: WorkspaceState.environments;
                 current-index <=> WorkspaceState.environment-index;
                 font-weight: 500;
+                enabled: WorkspaceState.has-collection;
                 selected => { WorkspaceState.environment-selected(); }
             }
         }
         Rectangle { height: 1px; background: Theme.line-soft; }
-        VerticalLayout {
+        if !WorkspaceState.has-collection: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            padding: 24px;
+            Text {
+                text: "Open an ApiArk collection, or press Ctrl+T for a scratch request";
+                color: Theme.faint;
+                font-size: 12px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+        if WorkspaceState.has-collection: VerticalLayout {
             vertical-stretch: 1;
             padding-top: 6px;
             padding-bottom: 6px;
@@ -218,6 +214,8 @@ export component Sidebar inherits Rectangle {
                     new-folder => { WorkspaceState.new-folder(i); }
                     rename => { WorkspaceState.rename-start(i); }
                     delete => { WorkspaceState.delete-row(i); }
+                    settings => { WorkspaceState.collection-settings(i); }
+                    close => { WorkspaceState.close-collection(i); }
                     rename-commit(text) => { WorkspaceState.rename-commit(text); }
                     rename-cancel => { WorkspaceState.rename-cancel(); }
                     done => { root.focus-tree(); }

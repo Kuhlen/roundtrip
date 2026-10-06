@@ -128,14 +128,19 @@ impl WorkspaceController {
     }
 
     pub(crate) fn pick_file(&self, index: i32) {
-        let Some(root) = self.root() else { return };
-        let Some(picked) = (self.deps.pick_file)(&root) else {
+        let root = self.tab_root();
+        let start = root
+            .clone()
+            .or_else(|| self.env_root())
+            .or_else(std::env::home_dir)
+            .unwrap_or_default();
+        let Some(picked) = (self.deps.pick_file)(&start) else {
             return;
         };
-        // relative survives moving or cloning the collection
-        let path = match picked.strip_prefix(&root) {
-            Ok(rel) => rel.display().to_string(),
-            Err(_) => picked.display().to_string(),
+        // relative survives moving or cloning the collection; no collection = absolute
+        let path = match root.as_deref().and_then(|r| picked.strip_prefix(r).ok()) {
+            Some(rel) => rel.display().to_string(),
+            None => picked.display().to_string(),
         };
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();

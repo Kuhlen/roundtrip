@@ -7,7 +7,9 @@ use domain::AppError;
 use domain::http::{Body, KeyValue};
 use domain::session::Session;
 use slint::{CloseRequestResponse, ComponentHandle, Model};
-use support::{ROOT, build, fakes, kv, opened, p, setup, state, strings, tree_labels, tree_names};
+use support::{
+    ROOT, build, fakes, kv, opened, p, row_of, setup, state, strings, tree_labels, tree_names,
+};
 
 #[test]
 fn starts_empty() {
@@ -25,10 +27,10 @@ fn open_shows_tree_and_environments() {
     let (f, ui, _c) = opened();
     let s = state(&ui);
     assert!(s.get_has_collection());
-    assert_eq!(s.get_collection_name(), "httpbin-demo");
     assert_eq!(
         tree_names(&ui),
         [
+            "httpbin-demo",
             "users",
             "List users",
             "Create user",
@@ -37,7 +39,10 @@ fn open_shows_tree_and_environments() {
             "Upload avatar"
         ]
     );
-    assert_eq!(tree_labels(&ui), ["", "GET", "POST", "GET", "WS", "POST"]);
+    assert_eq!(
+        tree_labels(&ui),
+        ["", "", "GET", "POST", "GET", "WS", "POST"]
+    );
     assert_eq!(
         strings(s.get_environments()),
         ["No environment", "dev", "mine (personal)"]
@@ -45,8 +50,9 @@ fn open_shows_tree_and_environments() {
     assert_eq!(
         f.session.saves.borrow().last().cloned(),
         Some(Session {
-            last_collection: Some(PathBuf::from(ROOT)),
-            last_environment: Some("dev".into())
+            collections: vec![PathBuf::from(ROOT)],
+            environment: Some("dev".into()),
+            ..Session::default()
         })
     );
 }
@@ -57,7 +63,7 @@ fn not_a_collection_shows_banner_and_keeps_previous() {
     c.open_collection(Path::new("/elsewhere"));
     let s = state(&ui);
     assert_eq!(s.get_banner_title(), "Not an ApiArk collection");
-    assert_eq!(s.get_collection_name(), "httpbin-demo");
+    assert_eq!(tree_names(&ui)[0], "httpbin-demo");
     s.invoke_dismiss_banner();
     assert_eq!(s.get_banner_title(), "");
 }
@@ -65,21 +71,27 @@ fn not_a_collection_shows_banner_and_keeps_previous() {
 #[test]
 fn folder_click_toggles_children() {
     let (_f, ui, _c) = opened();
-    state(&ui).invoke_row_clicked(0);
+    state(&ui).invoke_row_clicked(row_of(&ui, "users"));
     assert_eq!(
         tree_names(&ui),
-        ["users", "Health check", "Echo socket", "Upload avatar"]
+        [
+            "httpbin-demo",
+            "users",
+            "Health check",
+            "Echo socket",
+            "Upload avatar"
+        ]
     );
-    assert!(!state(&ui).get_tree().row_data(0).unwrap().expanded);
-    state(&ui).invoke_row_clicked(0);
-    assert_eq!(tree_names(&ui).len(), 6);
+    assert!(!state(&ui).get_tree().row_data(1).unwrap().expanded);
+    state(&ui).invoke_row_clicked(row_of(&ui, "users"));
+    assert_eq!(tree_names(&ui).len(), 7);
 }
 
 #[test]
 fn select_fills_form_and_resolved_url() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     assert!(s.get_has_request());
     assert_eq!(s.get_request_name(), "List users");
     assert_eq!(s.get_crumb(), "users /");
@@ -94,7 +106,7 @@ fn select_fills_form_and_resolved_url() {
     );
     assert_eq!(s.get_param_count(), 1);
     assert_eq!(s.get_resolved_url(), "https://httpbin.org/get?page=2");
-    assert!(s.get_tree().row_data(1).unwrap().active);
+    assert!(s.get_tree().row_data(2).unwrap().active);
     assert!(s.get_can_send());
     assert!(!s.get_dirty());
 }
@@ -103,72 +115,23 @@ fn select_fills_form_and_resolved_url() {
 fn edit_marks_dirty_and_undo_clears_it() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.set_url("{{baseUrl}}/anything".into());
     s.invoke_changed();
     assert!(s.get_dirty());
-    assert!(s.get_tree().row_data(1).unwrap().dirty);
+    assert!(s.get_tree().row_data(2).unwrap().dirty);
     assert_eq!(s.get_resolved_url(), "https://httpbin.org/anything?page=2");
     s.set_url("{{baseUrl}}/get".into());
     s.invoke_changed();
     assert!(!s.get_dirty());
-    assert!(!s.get_tree().row_data(1).unwrap().dirty);
-}
-
-#[test]
-fn switch_while_dirty_asks_and_cancel_changes_nothing() {
-    let (f, ui, _c) = opened();
-    let s = state(&ui);
-    s.invoke_row_clicked(1);
-    s.set_url("edited".into());
-    s.invoke_changed();
-    s.invoke_row_clicked(2);
-    assert!(s.get_confirm_open());
-    assert_eq!(s.get_confirm_name(), "List users");
-    assert_eq!(s.get_confirm_file(), "users/list-users.yaml");
-    s.invoke_confirm_cancel();
-    assert!(!s.get_confirm_open());
-    assert_eq!(s.get_request_name(), "List users");
-    assert_eq!(s.get_url(), "edited");
-    assert!(s.get_dirty());
-    assert!(f.collections.saved.borrow().is_empty());
-}
-
-#[test]
-fn discard_switches_without_saving() {
-    let (f, ui, _c) = opened();
-    let s = state(&ui);
-    s.invoke_row_clicked(1);
-    s.set_url("edited".into());
-    s.invoke_changed();
-    s.invoke_row_clicked(2);
-    s.invoke_confirm_discard();
-    assert_eq!(s.get_request_name(), "Create user");
-    assert_eq!(s.get_url(), "{{baseUrl}}/post");
-    assert!(!s.get_dirty());
-    assert!(f.collections.saved.borrow().is_empty());
-}
-
-#[test]
-fn confirm_save_saves_then_switches() {
-    let (f, ui, _c) = opened();
-    let s = state(&ui);
-    s.invoke_row_clicked(1);
-    s.set_url("edited".into());
-    s.invoke_changed();
-    s.invoke_row_clicked(2);
-    s.invoke_confirm_save();
-    let saved = f.collections.saved.borrow();
-    assert_eq!(saved[0].0, p("users/list-users.yaml"));
-    assert_eq!(saved[0].1.url, "edited");
-    assert_eq!(s.get_request_name(), "Create user");
+    assert!(!s.get_tree().row_data(2).unwrap().dirty);
 }
 
 #[test]
 fn save_writes_the_form_and_clears_dirty() {
     let (f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.get_headers().set_row_data(
         0,
         KvRow {
@@ -191,19 +154,18 @@ fn save_writes_the_form_and_clears_dirty() {
 }
 
 #[test]
-fn failed_save_stays_dirty_shows_banner_and_cancels_switch() {
+fn failed_save_on_switch_shows_banner_and_still_opens_the_new_request() {
     let (f, ui, _c) = opened();
     *f.collections.save_error.borrow_mut() = Some(AppError::Storage("disk full".into()));
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.set_url("edited".into());
     s.invoke_changed();
-    s.invoke_row_clicked(2);
-    s.invoke_confirm_save();
+    s.invoke_row_clicked(row_of(&ui, "Create user"));
     assert_eq!(s.get_banner_title(), "Could not read or write a file");
     assert_eq!(s.get_banner_hint(), "disk full");
-    assert_eq!(s.get_request_name(), "List users");
-    assert!(s.get_dirty());
+    assert_eq!(s.get_request_name(), "Create user");
+    assert!(f.collections.saved.borrow().is_empty());
     assert!(!s.get_confirm_open());
 }
 
@@ -211,7 +173,7 @@ fn failed_save_stays_dirty_shows_banner_and_cancels_switch() {
 fn typing_into_placeholder_appends_row_and_remove_drops_it() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.get_params().set_row_data(
         1,
         KvRow {
@@ -239,7 +201,7 @@ fn typing_into_placeholder_appends_row_and_remove_drops_it() {
 fn disabled_param_is_not_counted_or_resolved() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.get_params().set_row_data(
         0,
         KvRow {
@@ -259,10 +221,10 @@ fn disabled_param_is_not_counted_or_resolved() {
 fn unsupported_body_and_protocol_disable_send() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(5);
+    s.invoke_row_clicked(row_of(&ui, "Upload avatar"));
     assert_eq!(s.get_unsupported_body(), "form-data");
     assert!(!s.get_can_send());
-    s.invoke_row_clicked(4);
+    s.invoke_row_clicked(row_of(&ui, "Echo socket"));
     assert_eq!(s.get_unsupported_protocol(), "WebSocket");
     assert!(!s.get_can_send());
 }
@@ -271,7 +233,7 @@ fn unsupported_body_and_protocol_disable_send() {
 fn saving_unsupported_body_keeps_it() {
     let (f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(5);
+    s.invoke_row_clicked(row_of(&ui, "Upload avatar"));
     s.set_url("{{baseUrl}}/anything".into());
     s.invoke_changed();
     s.invoke_save();
@@ -290,8 +252,8 @@ fn unreadable_request_shows_banner_and_keeps_form() {
         .borrow_mut()
         .insert(p("health.yaml"), Err(conflict));
     let s = state(&ui);
-    s.invoke_row_clicked(1);
-    s.invoke_row_clicked(3);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     assert_eq!(s.get_banner_title(), "Merge conflict in health.yaml");
     assert_eq!(s.get_request_name(), "List users");
 }
@@ -300,15 +262,17 @@ fn unreadable_request_shows_banner_and_keeps_form() {
 fn environment_change_is_saved_and_updates_resolved_url() {
     let (f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.set_environment_index(0);
     s.invoke_environment_selected();
     assert_eq!(s.get_resolved_url(), "{{baseUrl}}/get?page=2");
     assert_eq!(
         f.session.saves.borrow().last().cloned(),
         Some(Session {
-            last_collection: Some(PathBuf::from(ROOT)),
-            last_environment: None
+            collections: vec![PathBuf::from(ROOT)],
+            environment: None,
+            tabs: vec![p("users/list-users.yaml")],
+            active_tab: Some(0),
         })
     );
 }
@@ -322,7 +286,7 @@ fn broken_environment_shows_banner_and_still_sends() {
     let s = state(&ui);
     assert_eq!(s.get_banner_title(), "Could not read or write a file");
     assert_eq!(strings(s.get_environments()), ["No environment"]);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     assert_eq!(s.get_resolved_url(), "{{baseUrl}}/get?page=2");
     assert!(s.get_can_send());
 }
@@ -332,8 +296,9 @@ fn restore_reopens_last_collection_and_environment() {
     i_slint_backend_testing::init_no_event_loop();
     let f = fakes();
     *f.session.session.borrow_mut() = Session {
-        last_collection: Some(PathBuf::from(ROOT)),
-        last_environment: Some("mine".into()),
+        collections: vec![PathBuf::from(ROOT)],
+        environment: Some("mine".into()),
+        ..Session::default()
     };
     let (ui, c) = build(&f);
     c.restore();
@@ -346,8 +311,9 @@ fn restore_with_missing_collection_starts_empty_without_banner() {
     i_slint_backend_testing::init_no_event_loop();
     let f = fakes();
     *f.session.session.borrow_mut() = Session {
-        last_collection: Some(PathBuf::from("/gone")),
-        last_environment: None,
+        collections: vec![PathBuf::from("/gone")],
+        environment: None,
+        ..Session::default()
     };
     let (ui, c) = build(&f);
     c.restore();
@@ -356,28 +322,25 @@ fn restore_with_missing_collection_starts_empty_without_banner() {
 }
 
 #[test]
-fn close_while_dirty_keeps_window_and_asks() {
-    let (_f, ui, c) = opened();
+fn close_while_dirty_saves_and_hides() {
+    let (f, ui, c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
-    assert!(matches!(
-        c.close_requested(),
-        CloseRequestResponse::HideWindow
-    ));
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.set_url("edited".into());
     s.invoke_changed();
     assert!(matches!(
         c.close_requested(),
-        CloseRequestResponse::KeepWindowShown
+        CloseRequestResponse::HideWindow
     ));
-    assert!(s.get_confirm_open());
+    assert_eq!(f.collections.saved.borrow()[0].1.url, "edited");
+    assert!(!s.get_confirm_open());
 }
 
 #[test]
 fn reopening_mid_send_keeps_send_disabled() {
     let (_f, ui, c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.invoke_send();
     assert_eq!(s.get_send_status(), SendStatus::Sending);
     c.open_collection(Path::new(ROOT));
@@ -389,7 +352,7 @@ fn reopening_mid_send_keeps_send_disabled() {
 fn save_without_edits_does_not_touch_the_file() {
     let (f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.invoke_save();
     assert!(f.collections.saved.borrow().is_empty());
 }
@@ -398,12 +361,12 @@ fn save_without_edits_does_not_touch_the_file() {
 fn saved_method_edit_updates_the_sidebar_label() {
     let (_f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(2);
-    assert_eq!(tree_labels(&ui)[2], "POST");
+    s.invoke_row_clicked(row_of(&ui, "Create user"));
+    assert_eq!(tree_labels(&ui)[3], "POST");
     s.set_method_index(0);
     s.invoke_changed();
     s.invoke_save();
-    assert_eq!(tree_labels(&ui)[2], "GET");
+    assert_eq!(tree_labels(&ui)[3], "GET");
 }
 
 #[test]
@@ -416,24 +379,23 @@ fn opening_another_collection_clears_the_old_banner() {
 }
 
 #[test]
-fn opening_another_collection_clears_the_old_response() {
+fn opening_another_collection_keeps_the_open_request_and_response() {
     let (_f, ui, c) = opened();
     let s = state(&ui);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     s.set_status_text("200 OK".into());
     s.set_response_raw("old".into());
-    c.open_collection(Path::new(ROOT));
-    assert_eq!(s.get_status_text(), "");
-    assert_eq!(s.get_response_raw(), "");
+    c.open_collection(Path::new(support::ORDERS));
+    assert_eq!(s.get_request_name(), "List users");
+    assert_eq!(s.get_status_text(), "200 OK");
+    assert_eq!(s.get_response_raw(), "old");
 }
 
 #[test]
 fn escape_cancels_the_confirm_dialog() {
-    let (_f, ui, _c) = opened();
+    let (f, ui, _c) = opened();
     let s = state(&ui);
-    s.invoke_row_clicked(1);
-    s.set_url("edited".into());
-    s.invoke_changed();
-    s.invoke_row_clicked(2);
+    s.invoke_delete_row(row_of(&ui, "List users"));
     assert!(s.get_confirm_open());
     let escape: slint::SharedString = slint::platform::Key::Escape.into();
     ui.window()
@@ -443,6 +405,5 @@ fn escape_cancels_the_confirm_dialog() {
     ui.window()
         .dispatch_event(slint::platform::WindowEvent::KeyReleased { text: escape });
     assert!(!s.get_confirm_open());
-    assert_eq!(s.get_request_name(), "List users");
-    assert!(s.get_dirty());
+    assert!(f.collections.deleted.borrow().is_empty());
 }

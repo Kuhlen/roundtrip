@@ -74,11 +74,11 @@ export component RequestHeader inherits Rectangle {
 }
 
 export component RequestEditor inherits Rectangle {
-    if !WorkspaceState.has-request: VerticalLayout {
+    if WorkspaceState.tabs.length == 0: VerticalLayout {
         alignment: center;
         padding: 24px;
         spacing: 8px;
-        Text { text: "Pick a request from the sidebar"; color: Theme.muted; font-size: 14px; horizontal-alignment: center; }
+        Text { text: "Pick a request from the sidebar, or press Ctrl+T"; color: Theme.muted; font-size: 14px; horizontal-alignment: center; }
         Text {
             text: "Roundtrip reads ApiArk collections as they are. Nothing is converted.";
             color: Theme.faint;

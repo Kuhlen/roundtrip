@@ -4,7 +4,7 @@ use app::ui::AuthFields;
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::http::Request;
-use support::{open_with_env, p, set_collection_auth, setup, state};
+use support::{ROOT, open_with_env, p, row_of, set_collection_auth, setup, state};
 
 fn bearer(token: &str) -> AuthFields {
     AuthFields {
@@ -19,7 +19,7 @@ fn own_auth_edit_marks_dirty_and_saves() {
     let (f, ui, c) = setup();
     open_with_env(&ui, &c);
     let s = state(&ui);
-    s.invoke_row_clicked(1);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
     assert_eq!(s.get_request_auth().kind, 0);
     s.set_request_auth(bearer("abc"));
     s.invoke_changed();
@@ -47,7 +47,7 @@ fn inherit_shows_the_collection_auth() {
     );
     open_with_env(&ui, &c);
     let s = state(&ui);
-    s.invoke_row_clicked(3);
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     assert_eq!(s.get_inherited_auth(), "Uses the collection auth: Bearer.");
     assert!(s.get_can_send());
 }
@@ -58,7 +58,7 @@ fn unsupported_collection_auth_blocks_inheriting_requests() {
     set_collection_auth(&f, Some(Auth::Unsupported("oauth2".into())));
     open_with_env(&ui, &c);
     let s = state(&ui);
-    s.invoke_row_clicked(3);
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     assert!(!s.get_can_send());
     assert_eq!(
         s.get_inherited_auth(),
@@ -82,7 +82,7 @@ fn own_unsupported_auth_blocks_send_and_survives_save() {
     );
     open_with_env(&ui, &c);
     let s = state(&ui);
-    s.invoke_row_clicked(3);
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     assert_eq!(s.get_request_auth().unsupported, "digest");
     assert!(!s.get_can_send());
     s.set_url("http://h2".into());
@@ -105,7 +105,7 @@ fn settings_show_and_save_the_collection_auth() {
     );
     open_with_env(&ui, &c);
     let s = state(&ui);
-    s.invoke_open_settings();
+    s.invoke_collection_settings(row_of(&ui, "httpbin-demo"));
     assert!(s.get_settings_open());
     let shown = s.get_settings_auth();
     assert_eq!((shown.kind, shown.place), (3, 1));
@@ -116,9 +116,9 @@ fn settings_show_and_save_the_collection_auth() {
     assert!(!s.get_settings_open());
     assert_eq!(
         f.collections.auth_saves.borrow().last().cloned(),
-        Some(Some(Auth::Bearer { token: "t".into() }))
+        Some((ROOT.into(), Some(Auth::Bearer { token: "t".into() })))
     );
-    s.invoke_row_clicked(3);
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     assert_eq!(s.get_inherited_auth(), "Uses the collection auth: Bearer.");
 }
 
@@ -128,6 +128,8 @@ fn failed_settings_save_keeps_the_dialog_open() {
     open_with_env(&ui, &c);
     *f.collections.edit_error.borrow_mut() = Some(AppError::Storage("disk full".into()));
     let s = state(&ui);
+    // Auth tab link: the active request's collection
+    s.invoke_row_clicked(row_of(&ui, "Health check"));
     s.invoke_open_settings();
     s.set_settings_auth(bearer("t"));
     s.invoke_save_settings();

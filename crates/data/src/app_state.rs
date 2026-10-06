@@ -1,4 +1,4 @@
-//! Last collection + environment as JSON in `<config dir>/roundtrip/state.json`.
+//! Open collections, tabs and environment as JSON in `<config dir>/roundtrip/state.json`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -12,7 +12,18 @@ pub struct AppStateFile {
 
 #[derive(Serialize, Deserialize, Default)]
 struct StateJson {
+    #[serde(default)]
+    collections: Vec<PathBuf>,
+    #[serde(default)]
+    tabs: Vec<PathBuf>,
+    #[serde(default)]
+    active_tab: Option<usize>,
+    #[serde(default)]
+    environment: Option<String>,
+    // single-collection format: read once, never written
+    #[serde(default, skip_serializing)]
     last_collection: Option<PathBuf>,
+    #[serde(default, skip_serializing)]
     last_environment: Option<String>,
 }
 
@@ -34,17 +45,27 @@ impl SessionStore for AppStateFile {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
+        let collections = if state.collections.is_empty() {
+            state.last_collection.into_iter().collect()
+        } else {
+            state.collections
+        };
         Session {
-            last_collection: state.last_collection,
-            last_environment: state.last_environment,
+            collections,
+            tabs: state.tabs,
+            active_tab: state.active_tab,
+            environment: state.environment.or(state.last_environment),
         }
     }
 
     // state errors are ignored
     fn save(&self, session: &Session) {
         let state = StateJson {
-            last_collection: session.last_collection.clone(),
-            last_environment: session.last_environment.clone(),
+            collections: session.collections.clone(),
+            tabs: session.tabs.clone(),
+            active_tab: session.active_tab,
+            environment: session.environment.clone(),
+            ..StateJson::default()
         };
         if let Some(dir) = self.path.parent() {
             let _ = fs::create_dir_all(dir);

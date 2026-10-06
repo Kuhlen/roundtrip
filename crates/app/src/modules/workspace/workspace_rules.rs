@@ -5,12 +5,13 @@ use std::path::{Path, PathBuf};
 
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::collection::{Node, Protocol};
+use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request};
 use domain::interpolation::interpolate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowKind {
+    Collection { expanded: bool },
     Folder { expanded: bool },
     Request { method: Method, protocol: Protocol },
 }
@@ -21,6 +22,27 @@ pub struct FlatRow {
     pub name: String,
     pub path: PathBuf,
     pub kind: RowKind,
+}
+
+/// Every open collection as a root row with its tree below.
+pub fn flatten_collections(
+    collections: &[Collection],
+    collapsed: &HashSet<PathBuf>,
+) -> Vec<FlatRow> {
+    let mut rows = Vec::new();
+    for c in collections {
+        let expanded = !collapsed.contains(&c.path);
+        rows.push(FlatRow {
+            depth: 0,
+            name: c.name.clone(),
+            path: c.path.clone(),
+            kind: RowKind::Collection { expanded },
+        });
+        if expanded {
+            walk(&c.children, 1, collapsed, &mut rows);
+        }
+    }
+    rows
 }
 
 /// Tree → visible rows; children of collapsed folders are skipped.
@@ -69,7 +91,7 @@ fn walk(nodes: &[Node], depth: usize, collapsed: &HashSet<PathBuf>, rows: &mut V
 
 pub fn row_label(kind: &RowKind) -> &'static str {
     match kind {
-        RowKind::Folder { .. } => "",
+        RowKind::Collection { .. } | RowKind::Folder { .. } => "",
         RowKind::Request { method, protocol } => match protocol {
             Protocol::Http => method.as_str(),
             Protocol::Graphql => "GQL",
@@ -146,6 +168,11 @@ pub fn inherit_note(collection: Option<&Auth>) -> String {
         }
         Some(a) => format!("Uses the collection auth: {}.", auth_label(a)),
     }
+}
+
+/// Note under "Inherit" for a tab saved in no collection.
+pub fn inherit_note_untitled() -> String {
+    "No collection: no auth.".into()
 }
 
 pub fn interpolate_request(request: &Request, lookup: impl Fn(&str) -> Option<String>) -> Request {
@@ -306,4 +333,29 @@ pub fn format_size(bytes: u64) -> String {
         b if b < 1024 * 1024 => format!("{:.1} KB", b as f64 / KB),
         b => format!("{:.1} MB", b as f64 / (KB * KB)),
     }
+}
+
+/// Save as targets: the root, then every folder depth-first, labelled "/ a / b".
+pub fn folder_choices(collection: &Collection) -> Vec<(String, PathBuf)> {
+    fn walk(nodes: &[Node], label: &str, out: &mut Vec<(String, PathBuf)>) {
+        for n in nodes {
+            if let Node::Folder {
+                name,
+                path,
+                children,
+            } = n
+            {
+                let label = if label == "/" {
+                    format!("/ {name}")
+                } else {
+                    format!("{label} / {name}")
+                };
+                out.push((label.clone(), path.clone()));
+                walk(children, &label, out);
+            }
+        }
+    }
+    let mut out = vec![("/".to_owned(), collection.path.clone())];
+    walk(&collection.children, "/", &mut out);
+    out
 }

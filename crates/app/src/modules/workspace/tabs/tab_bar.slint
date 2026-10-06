@@ -1,0 +1,128 @@
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, TabItem } from "../workspace_state.slint";
+
+// fixed width keeps the drag drop index simple
+export global TabMetrics { out property <length> width: 160px; }
+
+component TabChip inherits Rectangle {
+    in property <TabItem> item;
+    in property <int> index;
+    in property <int> count;
+    callback clicked();
+    callback close();
+    callback pin();
+    callback duplicate();
+    callback close-others();
+    callback close-all();
+    callback moved(int);
+    property <bool> dragged;
+    opacity: dragged && touch.pressed ? 0.6 : 1;
+    width: TabMetrics.width;
+    height: 34px;
+    background: root.item.active ? Theme.surface : touch.has-hover ? #ffffff08 : transparent;
+    // below the layout: the × TouchArea must win its clicks
+    touch := TouchArea {
+        pointer-event(e) => {
+            if e.button == PointerEventButton.middle && e.kind == PointerEventKind.up && !root.item.pinned {
+                root.close();
+            }
+            if e.kind == PointerEventKind.down {
+                root.dragged = false;
+            }
+            if e.kind == PointerEventKind.move && self.pressed && abs(self.mouse-x - self.pressed-x) > 8px {
+                root.dragged = true;
+            }
+            if e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.dragged {
+                root.moved(max(0, min(root.count - 1, Math.floor((root.index * TabMetrics.width + self.mouse-x) / TabMetrics.width))));
+            }
+        }
+        // a drag must not also switch tabs
+        clicked => { if !root.dragged { root.clicked(); } }
+    }
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: root.item.pinned ? "Unpin" : "Pin";
+                activated => { root.pin(); }
+            }
+            MenuItem {
+                title: "Duplicate";
+                activated => { root.duplicate(); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Close";
+                activated => { root.close(); }
+            }
+            MenuItem {
+                title: "Close others";
+                activated => { root.close-others(); }
+            }
+            MenuItem {
+                title: "Close all";
+                activated => { root.close-all(); }
+            }
+        }
+    }
+    if root.item.active: Rectangle { y: parent.height - 2px; height: 2px; background: Theme.accent; }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 6px;
+        spacing: 6px;
+        if root.item.pinned: Text { text: "•"; color: Theme.accent; vertical-alignment: center; }
+        Text {
+            horizontal-stretch: 1;
+            text: root.item.title;
+            color: root.item.active ? Theme.text : Theme.muted;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.item.dirty: Text { text: "●"; color: Theme.accent; font-size: 10px; vertical-alignment: center; }
+        if !root.item.pinned: Rectangle {
+            width: 18px;
+            Text {
+                text: "×";
+                color: x.has-hover ? Theme.err : Theme.faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            x := TouchArea { clicked => { root.close(); } }
+        }
+    }
+}
+
+export component TabBar inherits Rectangle {
+    height: 34px;
+    background: Theme.side;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line-soft; }
+    Flickable {
+        content-width: max(self.width, WorkspaceState.tabs.length * TabMetrics.width + 40px);
+        HorizontalLayout {
+            alignment: start;
+            for tab[i] in WorkspaceState.tabs: TabChip {
+                item: tab;
+                index: i;
+                count: WorkspaceState.tabs.length;
+                clicked => { WorkspaceState.tab-clicked(i); }
+                close => { WorkspaceState.tab-close(i); }
+                pin => { WorkspaceState.tab-pin(i); }
+                duplicate => { WorkspaceState.tab-duplicate(i); }
+                close-others => { WorkspaceState.tab-close-others(i); }
+                close-all => { WorkspaceState.tab-close-all(); }
+                moved(to) => { WorkspaceState.tab-moved(i, to); }
+            }
+            Rectangle {
+                width: 34px;
+                background: new.has-hover ? #ffffff08 : transparent;
+                Text {
+                    text: "+";
+                    font-size: 16px;
+                    color: new.has-hover ? Theme.text : Theme.muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                new := TouchArea { clicked => { WorkspaceState.tab-new(); } }
+            }
+        }
+    }
+}

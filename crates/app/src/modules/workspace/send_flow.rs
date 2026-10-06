@@ -1,14 +1,18 @@
-//! Send on a worker thread; the result lands back on the UI thread.
+//! Send on a worker thread; the result lands in the tab that sent it.
 
 use std::time::{Duration, Instant};
 
 use domain::AppError;
 use domain::http::Response;
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::ComponentHandle;
 
+use super::tabs::tab::ResponseView;
 use super::workspace_controller::WorkspaceController;
 use super::workspace_rules;
-use crate::ui::{AppWindow, KvRow, SendStatus, StatusClass, WorkspaceState};
+use crate::ui::WorkspaceState;
+
+/// (tab id, result, elapsed, pretty body)
+pub(super) type Delivery = (u64, Result<Response, AppError>, Duration, Option<String>);
 
 impl WorkspaceController {
     pub(super) fn send(&self) {
@@ -17,87 +21,51 @@ impl WorkspaceController {
         if !s.get_can_send() {
             return;
         }
+        let Some(id) = self.active.get() else { return };
         // files re-read on each Send
         self.refresh_vars();
-        let request = self.active.borrow().as_ref().map(|a| {
-            let out = self.outgoing(self.form(&s, a));
+        let request = self.with_active(|t| {
+            let out = self.outgoing(self.form(&s, &t.saved));
             workspace_rules::interpolate_request(&out, |n| self.lookup(n))
         });
         let Some(mut request) = request else { return };
-        if let Some(root) = self.root() {
+        if let Some(root) = self.tab_root() {
             workspace_rules::resolve_files(&mut request, &root);
         }
-        s.set_send_status(SendStatus::Sending);
+        let sending = ResponseView::sending();
+        sending.show(&s);
+        self.with_active_mut(|t| t.response = sending);
         let sender = self.deps.sender.clone();
         let pretty_json = self.deps.pretty_json;
+        let tx = self.responses.0.clone();
         let weak = self.ui.clone();
+        // Rc controller stays on the UI thread: result goes by channel, then a wake-up
         std::thread::spawn(move || {
             let start = Instant::now();
             let result = sender.send(&request);
             let elapsed = start.elapsed();
             let pretty = result.as_ref().ok().and_then(|r| pretty_json(&r.body));
-            // Send is disabled while sending: no newer response can be overwritten
-            let _ = weak.upgrade_in_event_loop(move |ui| show_result(&ui, result, elapsed, pretty));
+            if tx.send((id, result, elapsed, pretty)).is_ok() {
+                let _ = weak.upgrade_in_event_loop(|ui| {
+                    ui.global::<WorkspaceState>().invoke_response_ready();
+                });
+            }
         });
     }
-}
 
-pub(super) fn reset_response(s: &WorkspaceState) {
-    s.set_send_status(SendStatus::Idle);
-    s.set_status_text("".into());
-    s.set_status_class(StatusClass::Ok);
-    s.set_elapsed("".into());
-    s.set_size("".into());
-    s.set_truncated(false);
-    s.set_response_raw("".into());
-    s.set_response_pretty("".into());
-    s.set_response_headers(ModelRc::default());
-    s.set_fail_title("".into());
-    s.set_fail_hint("".into());
-    s.set_fail_detail("".into());
-}
-
-/// Runs on the UI thread with the worker's result.
-fn show_result(
-    ui: &AppWindow,
-    result: Result<Response, AppError>,
-    elapsed: Duration,
-    pretty: Option<String>,
-) {
-    let s = ui.global::<WorkspaceState>();
-    match result {
-        Ok(r) => {
-            s.set_status_text(format!("{} {}", r.status, r.status_text).into());
-            s.set_status_class(match r.status {
-                500.. => StatusClass::Err,
-                300.. => StatusClass::Warn,
-                _ => StatusClass::Ok,
-            });
-            s.set_elapsed(format!("{} ms", r.elapsed.as_millis()).into());
-            s.set_size(workspace_rules::format_size(r.size_bytes).into());
-            s.set_truncated(r.truncated);
-            s.set_response_raw(r.body.into());
-            s.set_response_pretty(pretty.unwrap_or_default().into());
-            let headers: Vec<KvRow> = r
-                .headers
-                .into_iter()
-                .map(|h| KvRow {
-                    enabled: true,
-                    key: h.key.into(),
-                    value: h.value.into(),
-                    file: false,
-                })
-                .collect();
-            s.set_response_headers(ModelRc::new(VecModel::from(headers)));
-            s.set_send_status(SendStatus::Done);
-        }
-        Err(e) => {
-            let (title, hint) = workspace_rules::error_text(&e, None);
-            s.set_elapsed(format!("{} ms", elapsed.as_millis()).into());
-            s.set_fail_title(title.into());
-            s.set_fail_hint(hint.into());
-            s.set_fail_detail(e.to_string().into());
-            s.set_send_status(SendStatus::Failed);
+    /// Route queued results: shown on the active tab, stored on others, dropped for closed ones.
+    pub(super) fn deliver_responses(&self) {
+        let deliveries: Vec<Delivery> = self.responses.1.borrow().try_iter().collect();
+        let ui = self.ui();
+        let s = ui.global::<WorkspaceState>();
+        for (id, result, elapsed, pretty) in deliveries {
+            let view = ResponseView::from_result(result, elapsed, pretty);
+            if self.active.get() == Some(id) {
+                view.show(&s);
+            }
+            if let Some(t) = self.tabs.borrow_mut().iter_mut().find(|t| t.id == id) {
+                t.response = view;
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Collection, environments and tree: what is open and which request is active.
+//! Collections, environments and tree: what is open and which request is active.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -6,42 +6,92 @@ use std::path::{Path, PathBuf};
 use domain::collection::{Collection, Node};
 use domain::environment::Scope;
 use domain::http::Method;
-use domain::session::Session;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use crate::modules::workspace::send_flow::reset_response;
-use crate::modules::workspace::workspace_controller::{Active, PendingAction, WorkspaceController};
+use crate::modules::workspace::workspace_controller::{
+    PendingAction, WorkspaceController, strings,
+};
 use crate::modules::workspace::workspace_rules::{self, FlatRow, RowKind};
-use crate::ui::{SendStatus, TreeRow, WorkspaceState};
+use crate::ui::{TreeRow, WorkspaceState};
 
 impl WorkspaceController {
+    /// Adds `collection`, or refreshes it in place when already open.
     pub(crate) fn show_collection(&self, collection: Collection, environment: Option<&str>) {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
         // stale banner from the previous open; load_environments may set a new one
         self.dismiss_banner();
-        if s.get_send_status() != SendStatus::Sending {
-            reset_response(&s);
-        }
         s.set_has_collection(true);
         s.set_settings_open(false);
-        s.set_collection_name(collection.name.as_str().into());
-        s.set_collection_path(collection.path.display().to_string().into());
-        *self.collection.borrow_mut() = Some(collection);
-        self.collapsed.borrow_mut().clear();
+        self.collapsed.borrow_mut().remove(&collection.path);
+        let first = {
+            let mut open = self.collections.borrow_mut();
+            match open.iter().position(|c| c.path == collection.path) {
+                Some(i) => {
+                    open[i] = collection;
+                    i == 0
+                }
+                None => {
+                    open.push(collection);
+                    open.len() == 1
+                }
+            }
+        };
         *self.editing.borrow_mut() = None;
-        self.clear_request(&s);
         self.refresh_tree();
-        self.load_environments(environment);
+        if first {
+            let name = environment
+                .map(str::to_owned)
+                .or_else(|| self.active_environment());
+            self.load_environments(name.as_deref());
+            self.changed();
+        }
+        self.save_session();
+    }
+
+    /// Root of the collection row at `index`.
+    pub(crate) fn collection_row(&self, index: i32) -> Option<PathBuf> {
+        self.row(index)
+            .filter(|r| matches!(r.kind, RowKind::Collection { .. }))
+            .map(|r| r.path)
+    }
+
+    /// Stays open when one of its tabs will not save.
+    pub fn close_collection(&self, root: &Path) {
+        let ids = self.tab_ids(|t| t.file.as_ref().is_some_and(|f| f.collection == root));
+        if !self.advance(PendingAction::CloseTabs(ids)) {
+            return;
+        }
+        let ui = self.ui();
+        let s = ui.global::<WorkspaceState>();
+        let was_first = self.env_root().as_deref() == Some(root);
+        let name = self.active_environment();
+        self.collections.borrow_mut().retain(|c| c.path != root);
+        self.collapsed.borrow_mut().retain(|p| !p.starts_with(root));
+        *self.editing.borrow_mut() = None;
+        if self.settings_target.borrow().as_deref() == Some(root) {
+            s.set_settings_open(false);
+        }
+        if self.collections.borrow().is_empty() {
+            s.set_has_collection(false);
+            s.set_environments(strings(["No environment"]));
+            s.set_environment_index(0);
+            self.envs.borrow_mut().clear();
+            self.refresh_vars();
+        } else if was_first {
+            self.load_environments(name.as_deref());
+        }
+        self.refresh_tree();
+        if was_first {
+            // other collections' requests resolve with the new variables
+            self.changed();
+        }
         self.save_session();
     }
 
     pub(crate) fn ask_open_collection(&self) {
-        if self.is_dirty() {
-            self.ask(PendingAction::OpenCollection);
-        } else {
-            self.pick_collection();
-        }
+        self.flush();
+        self.pick_collection();
     }
 
     pub(crate) fn pick_collection(&self) {
@@ -55,7 +105,7 @@ impl WorkspaceController {
     }
 
     pub(crate) fn load_environments(&self, preferred: Option<&str>) {
-        let Some(root) = self.root() else { return };
+        let Some(root) = self.env_root() else { return };
         let envs = self.deps.environments.list(&root).unwrap_or_else(|e| {
             self.banner(&e);
             Vec::new()
@@ -77,7 +127,7 @@ impl WorkspaceController {
         self.refresh_vars();
     }
 
-    fn active_environment(&self) -> Option<String> {
+    pub(crate) fn active_environment(&self) -> Option<String> {
         let index = self.ui().global::<WorkspaceState>().get_environment_index();
         let i = usize::try_from(index).ok()?.checked_sub(1)?;
         self.envs.borrow().get(i).map(|e| e.name.clone())
@@ -90,7 +140,7 @@ impl WorkspaceController {
     }
 
     pub(crate) fn refresh_vars(&self) {
-        let vars = match (self.root(), self.active_environment()) {
+        let vars = match (self.env_root(), self.active_environment()) {
             (Some(root), Some(name)) => self
                 .deps
                 .environments
@@ -112,21 +162,12 @@ impl WorkspaceController {
             .or_else(|| (self.deps.dynamic_var)(name))
     }
 
-    pub(crate) fn save_session(&self) {
-        self.deps.session.save(&Session {
-            last_collection: self.root(),
-            last_environment: self.active_environment(),
-        });
-    }
-
     pub(crate) fn refresh_tree(&self) {
-        let rows = self
-            .collection
-            .borrow()
-            .as_ref()
-            .map(|c| workspace_rules::flatten(&c.children, &self.collapsed.borrow()))
-            .unwrap_or_default();
-        let active = self.active.borrow().as_ref().map(|a| a.path.clone());
+        let rows = workspace_rules::flatten_collections(
+            &self.collections.borrow(),
+            &self.collapsed.borrow(),
+        );
+        let active = self.active_path();
         let editing = self.editing.borrow().clone();
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
@@ -141,7 +182,11 @@ impl WorkspaceController {
                     name: r.name.as_str().into(),
                     label: workspace_rules::row_label(&r.kind).into(),
                     folder: matches!(r.kind, RowKind::Folder { .. }),
-                    expanded: matches!(r.kind, RowKind::Folder { expanded: true }),
+                    collection: matches!(r.kind, RowKind::Collection { .. }),
+                    expanded: matches!(
+                        r.kind,
+                        RowKind::Folder { expanded: true } | RowKind::Collection { expanded: true }
+                    ),
                     active: is_active,
                     dirty: is_active && dirty,
                     editing: editing.as_deref() == Some(r.path.as_path()),
@@ -158,13 +203,36 @@ impl WorkspaceController {
     }
 
     /// Re-scan after a tree edit; collapsed folders and the active request stay.
+    // ponytail: re-scans every open collection; reload only the edited one if big trees lag
     pub(crate) fn reload_collection(&self) {
-        let Some(root) = self.root() else { return };
-        match self.deps.collections.load(&root) {
-            Ok(c) => *self.collection.borrow_mut() = Some(c),
-            Err(e) => self.banner(&e),
+        let roots: Vec<PathBuf> = self
+            .collections
+            .borrow()
+            .iter()
+            .map(|c| c.path.clone())
+            .collect();
+        for root in roots {
+            match self.deps.collections.load(&root) {
+                Ok(fresh) => {
+                    if let Some(c) = self
+                        .collections
+                        .borrow_mut()
+                        .iter_mut()
+                        .find(|c| c.path == root)
+                    {
+                        *c = fresh;
+                    }
+                }
+                Err(e) => self.banner(&e),
+            }
         }
         self.refresh_tree();
+    }
+
+    /// File of the active tab; None for none or scratch.
+    pub(crate) fn active_path(&self) -> Option<PathBuf> {
+        self.with_active(|t| t.file.as_ref().map(|f| f.path.clone()))
+            .flatten()
     }
 
     pub(crate) fn row(&self, index: i32) -> Option<FlatRow> {
@@ -178,7 +246,7 @@ impl WorkspaceController {
         self.rename_cancel();
         let Some(row) = self.row(index) else { return };
         match row.kind {
-            RowKind::Folder { .. } => {
+            RowKind::Collection { .. } | RowKind::Folder { .. } => {
                 {
                     let mut collapsed = self.collapsed.borrow_mut();
                     if !collapsed.remove(&row.path) {
@@ -187,45 +255,7 @@ impl WorkspaceController {
                 }
                 self.refresh_tree();
             }
-            RowKind::Request { .. } => self.select_request(row.path),
-        }
-    }
-
-    pub(crate) fn select_request(&self, path: PathBuf) {
-        if self
-            .active
-            .borrow()
-            .as_ref()
-            .is_some_and(|a| a.path == path)
-        {
-            return;
-        }
-        if self.is_dirty() {
-            self.ask(PendingAction::Select(path));
-        } else {
-            self.load_request(&path);
-        }
-    }
-
-    pub(crate) fn load_request(&self, path: &Path) {
-        let row = self.rows.borrow().iter().find(|r| r.path == path).cloned();
-        let Some(FlatRow {
-            name,
-            kind: RowKind::Request { protocol, .. },
-            ..
-        }) = row
-        else {
-            return;
-        };
-        match self.deps.collections.read_request(path) {
-            Ok(saved) => self.fill(Active {
-                path: path.to_path_buf(),
-                name,
-                protocol,
-                saved,
-            }),
-            // form keeps the previous request
-            Err(e) => self.banner(&e),
+            RowKind::Request { .. } => self.open_tab(row.path),
         }
     }
 }

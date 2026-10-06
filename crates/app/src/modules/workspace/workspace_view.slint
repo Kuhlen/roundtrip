@@ -6,15 +6,27 @@ import { RequestHeader, RequestEditor } from "request/request_editor.slint";
 import { ResponsePanel } from "response_panel.slint";
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { CollectionSettings } from "sidebar/collection_settings.slint";
+import { TabBar } from "tabs/tab_bar.slint";
+import { SaveAsDialog } from "tabs/save_as_dialog.slint";
 
 export component WorkspaceView inherits Rectangle {
-    // Ctrl+S / Ctrl+Enter; off while the dialog is open
+    // Ctrl+S / Ctrl+T / Ctrl+W / Ctrl+Enter; off while a dialog is open
     function shortcut(e: KeyEvent) -> EventResult {
-        if WorkspaceState.confirm-open || WorkspaceState.settings-open || !e.modifiers.control {
+        if root.dialog-open || !e.modifiers.control {
             return reject;
+        }
+        if e.text == "t" || e.text == "T" {
+            WorkspaceState.tab-new();
+            return accept;
         }
         if e.text == "s" || e.text == "S" {
             WorkspaceState.save();
+            return accept;
+        }
+        if e.text == "w" || e.text == "W" {
+            if WorkspaceState.active-tab >= 0 {
+                WorkspaceState.tab-close(WorkspaceState.active-tab);
+            }
             return accept;
         }
         if e.text == Key.Return {
@@ -28,7 +40,7 @@ export component WorkspaceView inherits Rectangle {
 
     // bubble phase: a focused field eats Delete first; the dialog guards the rest
     function tree-key(e: KeyEvent) -> EventResult {
-        if WorkspaceState.confirm-open || WorkspaceState.settings-open || WorkspaceState.active-row < 0 || e.modifiers.control {
+        if root.dialog-open || WorkspaceState.active-row < 0 || e.modifiers.control {
             return reject;
         }
         if e.text == Key.F2 {
@@ -67,6 +79,7 @@ export component WorkspaceView inherits Rectangle {
                 Rectangle { width: 1px; background: Theme.line-soft; }
                 VerticalLayout {
                     horizontal-stretch: 1;
+                    TabBar { }
                     RequestHeader { }
                     HorizontalLayout {
                         vertical-stretch: 1;
@@ -80,8 +93,9 @@ export component WorkspaceView inherits Rectangle {
     }
     if WorkspaceState.confirm-open: ConfirmDialog { }
     if WorkspaceState.settings-open: CollectionSettings { }
+    if WorkspaceState.save-as-open: SaveAsDialog { }
     // dialog focus is lost when it closes; shortcuts need keys back
-    property <bool> dialog-open: WorkspaceState.confirm-open || WorkspaceState.settings-open;
+    property <bool> dialog-open: WorkspaceState.confirm-open || WorkspaceState.settings-open || WorkspaceState.save-as-open;
     changed dialog-open => {
         if !self.dialog-open {
             keys.focus();

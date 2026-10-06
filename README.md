@@ -7,30 +7,26 @@ Roundtrip opens ApiArk collections as they are on disk (`.apiark/apiark.yaml`, o
 request, `.apiark/environments{,.local}/`, `.env` files) and writes them back without dropping fields
 it does not understand yet. You can switch back to ApiArk at any time.
 
-## Slice 1
+## Features
 
 - Open a collection, browse the tree, pick an environment (remembered between runs).
-- Edit method, URL, params, headers and JSON/XML/raw bodies; `{{var}}` and `{{$uuid}}`-style variables.
-- Send with Ctrl+Enter; status, time, size, pretty JSON, headers.
-- Save with Ctrl+S; unsaved edits are marked ● and guarded by a Save / Discard / Cancel dialog.
-- Not yet: cookies, history, tabs, scripts, other protocols.
-
-## Slice 2
-
+- Edit method, URL, params, headers; `{{var}}` and `{{$uuid}}`-style variables.
+- Bodies: JSON, XML, raw, urlencoded and form-data (a table; form-data rows can be files), binary
+  (a file), and GraphQL (Query, Variables, Operation name). `…` / "Choose file…" store a path
+  relative to the collection when the file is inside it; `{{var}}` works in paths.
 - Auth tab: Bearer, Basic, API key (header or query), or Inherit the collection's default auth
-  (⚙ Collection settings). Other ApiArk auth types are kept on save but block Send.
-- A header you write yourself (`Authorization`, or the API key's name) wins over auth.
-- "+" in the sidebar creates a request or folder at the root; right-click a row for New request,
+  ("Collection settings…" in a collection row's right-click menu, which also has "Close collection").
+  A header you write yourself (`Authorization`, or the API key's name) wins over auth.
+- Send with Ctrl+Enter; status, time, size, pretty JSON, headers.
+- Open several collections at once; environments come from the first one (as in ApiArk).
+- Tabs: open, pin, drag to reorder, close (×, middle click, Ctrl+W), Close others / all; open tabs come back on the next start.
+- Ctrl+T opens a scratch request you can send without a collection; Ctrl+S saves it into a collection.
+- Edits are saved automatically one second after the last change.
+- Ctrl+S saves immediately; ● marks a tab with edits not saved yet.
+- "+" in the sidebar creates a request or folder at the root of the first collection; right-click a row for New request,
   New folder, Rename (F2) and Delete (Del). Delete is permanent.
-
-## Slice 3
-
-- Body types: urlencoded and form-data (a table; form-data rows can be files), binary (a file), and
-  GraphQL (Query, Variables, Operation name). `…` / "Choose file…" store a path relative to the
-  collection when the file is inside it; `{{var}}` works in paths.
-- Form fields are stored in `body.content` the way ApiArk's importers write them. Content Roundtrip
-  can't read (for example a Bruno or HAR import) is kept on save but blocks Send.
-- Invalid GraphQL Variables block Send and Save instead of being dropped.
+- ApiArk content Roundtrip can't edit (other auth types, other body types, a Bruno or HAR import)
+  is kept on save but blocks Send. Invalid GraphQL Variables block Send and Save.
 
 ## Known limits
 
@@ -38,7 +34,7 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - Disabled and blank-key params/headers are not stored (ApiArk maps have no enabled flag); duplicate keys collapse.
 - A personal environment with the same name as a shared one is shadowed.
 - No file watcher: external edits after loading are overwritten on save.
-- The previous response stays visible when switching request.
+- Every request uses the first collection's environment, as in ApiArk.
 - Folder auth in _folder.yaml is ignored when sending (ApiArk does the same).
 - Disabled urlencoded rows are not stored (same as params and headers).
 - ApiArk sends a binary body's path as text, not the file.

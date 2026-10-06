@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, flatten, format_size, inherit_note, interpolate_request, resolve_files,
-    resolved_url, row_label, unsupported_body_note,
+    RowKind, error_text, flatten, flatten_collections, folder_choices, format_size, inherit_note,
+    interpolate_request, resolve_files, resolved_url, row_label, unsupported_body_note,
 };
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::collection::{Node, Protocol};
+use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
 
 fn request(name: &str, path: &str) -> Node {
@@ -68,6 +68,58 @@ fn collapsed_folder_hides_descendants() {
     );
     let rows = flatten(&tree(), &HashSet::from([PathBuf::from("/c/a")]));
     assert_eq!(rows[0].kind, RowKind::Folder { expanded: false });
+}
+
+#[test]
+fn flatten_collections_puts_children_under_each_root() {
+    let other = Collection {
+        name: "d".into(),
+        path: "/d".into(),
+        auth: None,
+        children: vec![request("D1", "/d/d1.yaml")],
+    };
+    let c = Collection {
+        name: "c".into(),
+        path: "/c".into(),
+        auth: None,
+        children: tree(),
+    };
+    let rows = flatten_collections(&[c, other], &HashSet::from([PathBuf::from("/d")]));
+    let shape: Vec<(&str, usize)> = rows.iter().map(|r| (r.name.as_str(), r.depth)).collect();
+    assert_eq!(
+        shape,
+        [
+            ("c", 0),
+            ("a", 1),
+            ("R1", 2),
+            ("b", 2),
+            ("R2", 3),
+            ("Top", 1),
+            ("d", 0)
+        ]
+    );
+    assert_eq!(rows[0].kind, RowKind::Collection { expanded: true });
+    assert_eq!(rows[6].kind, RowKind::Collection { expanded: false });
+    assert_eq!(rows[6].path, PathBuf::from("/d"));
+}
+
+#[test]
+fn folder_choices_list_every_folder_from_the_root() {
+    let c = Collection {
+        name: "c".into(),
+        path: "/c".into(),
+        auth: None,
+        children: tree(),
+    };
+    let choices: Vec<(String, PathBuf)> = folder_choices(&c);
+    assert_eq!(
+        choices,
+        [
+            ("/".to_string(), PathBuf::from("/c")),
+            ("/ a".to_string(), PathBuf::from("/c/a")),
+            ("/ a / b".to_string(), PathBuf::from("/c/a/b")),
+        ]
+    );
 }
 
 #[test]
