@@ -1,0 +1,52 @@
+import { Theme } from "../theme.slint";
+
+export component Toggle inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    horizontal-stretch: 0;
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.checked = !root.checked; }
+
+    HorizontalLayout {
+        spacing: 10px;
+        Text { text: root.text; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 28px;
+                height: 16px;
+                border-radius: 8px;
+                background: root.checked ? Theme.accent : Theme.line;
+                border-width: fs.has-focus ? 1px : 0;
+                border-color: Theme.text;
+                Rectangle {
+                    x: root.checked ? parent.width - self.width - 2px : 2px;
+                    y: 2px;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: root.checked ? Theme.on-accent : Theme.muted;
+                    animate x { duration: 120ms; }
+                }
+            }
+        }
+    }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " {
+                root.checked = !root.checked;
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        clicked => {
+            fs.focus();
+            root.checked = !root.checked;
+        }
+    }
+}

@@ -1,0 +1,17 @@
+name: Update avatar
+method: POST
+url: '{{baseUrl}}/post'
+body:
+  type: form-data
+  content: |-
+    [
+      {
+        "key": "name",
+        "value": "Ayu"
+      },
+      {
+        "key": "avatar",
+        "value": "avatar.png",
+        "type": "file"
+      }
+    ]

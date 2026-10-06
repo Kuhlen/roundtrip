@@ -1,12 +1,11 @@
+import { KvRow } from "../../snippets/kv_table.slint";
+import { AuthFields } from "../../snippets/auth_form.slint";
+
 export enum SendStatus { idle, sending, done, failed }
 export enum StatusClass { ok, warn, err }
-export enum KvTable { params, headers }
+export enum KvTable { params, headers, form }
 export enum DialogKind { unsaved, delete }
 export struct TreeRow { depth: int, name: string, label: string, folder: bool, expanded: bool, active: bool, dirty: bool, editing: bool }
-export struct KvRow { enabled: bool, key: string, value: string }
-// kind: 0 inherit (request) / none (collection), 1 bearer, 2 basic, 3 api key
-// place: 0 header, 1 query; unsupported: upstream type name, "" = editable
-export struct AuthFields { kind: int, token: string, username: string, password: string, key: string, value: string, place: int, unsupported: string }
 
 // in = pushed from Rust; in-out = form state owned by Slint, read by Rust
 export global WorkspaceState {
@@ -39,6 +38,12 @@ export global WorkspaceState {
     in property <[string]> body-kinds;
     in-out property <int> body-kind-index;
     in-out property <string> body;
+    // urlencoded and form-data share the rows; last row is the placeholder
+    in property <[KvRow]> form-rows;
+    in property <int> body-count;
+    in-out property <string> binary-path;
+    // shown instead of the editor when unsupported-body != ""
+    in property <string> body-note;
     // body type name, "" = editable
     in property <string> unsupported-body;
     // protocol name, "" = sendable
@@ -49,6 +54,13 @@ export global WorkspaceState {
     // effective auth (own or inherited) is unsupported
     in property <bool> auth-blocked;
     in property <bool> dirty;
+    // GraphQL request: Query tab replaces the body editor
+    in property <bool> graphql;
+    in-out property <string> gql-query;
+    in-out property <string> gql-variables;
+    in-out property <string> gql-operation;
+    // "" = Variables are valid JSON
+    in property <string> body-error;
     in-out property <int> editor-tab;
 
     // response
@@ -79,12 +91,14 @@ export global WorkspaceState {
     in property <DialogKind> dialog-kind;
     in property <bool> confirm-folder;
 
-    out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked;
+    out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked && self.body-error == "";
 
     callback open-collection();
     callback environment-selected();
     callback row-clicked(int);
     callback changed();
+    // -1 = binary path, >= 0 = form row
+    callback pick-file(int);
     callback kv-edited(KvTable, int);
     callback kv-removed(KvTable, int);
     callback send();

@@ -1,6 +1,12 @@
-import { Theme } from "../../theme.slint";
-import { AuthFields } from "workspace_state.slint";
-import { Btn, Field, Note, Select } from "controls.slint";
+import { Theme } from "../theme.slint";
+import { Btn } from "../widgets/btn.slint";
+import { Field } from "../widgets/field.slint";
+import { Note } from "../widgets/note.slint";
+import { Select } from "../widgets/select.slint";
+
+// kind: 0 inherit (request) / none (collection), 1 bearer, 2 basic, 3 api key
+// place: 0 header, 1 query; unsupported: upstream type name, "" = editable
+export struct AuthFields { kind: int, token: string, username: string, password: string, key: string, value: string, place: int, unsupported: string }
 
 component Caption inherits Text {
     font-size: 11px;

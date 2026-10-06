@@ -23,7 +23,10 @@ impl WorkspaceController {
             let out = self.outgoing(self.form(&s, a));
             workspace_rules::interpolate_request(&out, |n| self.lookup(n))
         });
-        let Some(request) = request else { return };
+        let Some(mut request) = request else { return };
+        if let Some(root) = self.root() {
+            workspace_rules::resolve_files(&mut request, &root);
+        }
         s.set_send_status(SendStatus::Sending);
         let sender = self.deps.sender.clone();
         let pretty_json = self.deps.pretty_json;
@@ -82,6 +85,7 @@ fn show_result(
                     enabled: true,
                     key: h.key.into(),
                     value: h.value.into(),
+                    file: false,
                 })
                 .collect();
             s.set_response_headers(ModelRc::new(VecModel::from(headers)));

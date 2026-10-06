@@ -1,8 +1,10 @@
-import { Theme } from "../../theme.slint";
-import { WorkspaceState } from "workspace_state.slint";
+import { Theme } from "../theme.slint";
 
 // pushes content down
 export component ErrorBanner inherits Rectangle {
+    in property <string> title;
+    in property <string> hint;
+    callback dismiss();
     background: Theme.err-bg;
     Rectangle {
         y: parent.height - 1px;
@@ -15,10 +17,10 @@ export component ErrorBanner inherits Rectangle {
         padding-top: 10px;
         padding-bottom: 10px;
         spacing: 14px;
-        Text { text: WorkspaceState.banner-title; font-weight: 600; color: Theme.banner-title; vertical-alignment: center; }
+        Text { text: root.title; font-weight: 600; color: Theme.banner-title; vertical-alignment: center; }
         Text {
             horizontal-stretch: 1;
-            text: WorkspaceState.banner-hint;
+            text: root.hint;
             color: Theme.banner-hint;
             vertical-alignment: center;
             overflow: elide;
@@ -30,9 +32,9 @@ export component ErrorBanner inherits Rectangle {
             background: dismiss.has-hover ? #ffffff14 : transparent;
             accessible-role: button;
             accessible-label: "Dismiss";
-            Image { source: @image-url("../../../assets/icons/close.svg"); colorize: Theme.banner-hint; }
+            Image { source: @image-url("../../assets/icons/close.svg"); colorize: Theme.banner-hint; }
             dismiss := TouchArea {
-                clicked => { WorkspaceState.dismiss-banner(); }
+                clicked => { root.dismiss(); }
             }
         }
     }

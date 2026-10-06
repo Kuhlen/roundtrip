@@ -1,11 +1,11 @@
 import { Theme } from "../../theme.slint";
 import { WorkspaceState } from "workspace_state.slint";
-import { ErrorBanner } from "error_banner.slint";
-import { Sidebar } from "sidebar.slint";
-import { RequestHeader, RequestEditor } from "request_editor.slint";
+import { ErrorBanner } from "../../snippets/error_banner.slint";
+import { Sidebar } from "sidebar/sidebar.slint";
+import { RequestHeader, RequestEditor } from "request/request_editor.slint";
 import { ResponsePanel } from "response_panel.slint";
 import { ConfirmDialog } from "confirm_dialog.slint";
-import { CollectionSettings } from "collection_settings.slint";
+import { CollectionSettings } from "sidebar/collection_settings.slint";
 
 export component WorkspaceView inherits Rectangle {
     // Ctrl+S / Ctrl+Enter; off while the dialog is open
@@ -56,7 +56,11 @@ export component WorkspaceView inherits Rectangle {
         VerticalLayout {
             width: 100%;
             height: 100%;
-            if WorkspaceState.banner-title != "": ErrorBanner { }
+            if WorkspaceState.banner-title != "": ErrorBanner {
+                title: WorkspaceState.banner-title;
+                hint: WorkspaceState.banner-hint;
+                dismiss => { WorkspaceState.dismiss-banner(); }
+            }
             HorizontalLayout {
                 vertical-stretch: 1;
                 Sidebar { width: 248px; focus-tree => { keys.focus(); } }

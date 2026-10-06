@@ -6,9 +6,11 @@ use domain::AppError;
 use serde_yaml::Value;
 
 pub mod app_state;
+mod body_file;
 pub mod collection_dir;
 pub mod dynamic_vars;
 pub mod environment_dir;
+pub mod graphql;
 pub mod http;
 
 /// YAML scalar as text: numbers/bools keep their spelling, null is empty.

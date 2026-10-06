@@ -1,5 +1,6 @@
 //! composition root
 
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,8 +21,19 @@ pub fn build(ui: &AppWindow) -> Result<Rc<WorkspaceController>, AppError> {
         session: Rc::new(AppStateFile::in_config_dir()),
         dynamic_var: data::dynamic_vars::resolve,
         pretty_json: data::http::pretty_json,
+        pick_file,
+        graphql_parse: data::graphql::parse,
+        graphql_json: data::graphql::to_json,
     };
     let controller = WorkspaceController::new(deps, ui);
     controller.restore();
     Ok(controller)
+}
+
+fn pick_file(start: &Path) -> Option<PathBuf> {
+    // sync dialog on the UI thread, like Open collection
+    rfd::FileDialog::new()
+        .set_title("Choose file")
+        .set_directory(start)
+        .pick_file()
 }

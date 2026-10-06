@@ -1,7 +1,9 @@
 import { ListView } from "std-widgets.slint";
-import { Theme } from "../../theme.slint";
-import { WorkspaceState, TreeRow } from "workspace_state.slint";
-import { Btn, Field, Select } from "controls.slint";
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, TreeRow } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+import { Select } from "../../../widgets/select.slint";
 
 component TreeLine inherits Rectangle {
     in property <TreeRow> item;

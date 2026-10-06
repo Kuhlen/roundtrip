@@ -23,6 +23,15 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - "+" in the sidebar creates a request or folder at the root; right-click a row for New request,
   New folder, Rename (F2) and Delete (Del). Delete is permanent.
 
+## Slice 3
+
+- Body types: urlencoded and form-data (a table; form-data rows can be files), binary (a file), and
+  GraphQL (Query, Variables, Operation name). `…` / "Choose file…" store a path relative to the
+  collection when the file is inside it; `{{var}}` works in paths.
+- Form fields are stored in `body.content` the way ApiArk's importers write them. Content Roundtrip
+  can't read (for example a Bruno or HAR import) is kept on save but blocks Send.
+- Invalid GraphQL Variables block Send and Save instead of being dropped.
+
 ## Known limits
 
 - YAML comments are lost on save.
@@ -31,6 +40,8 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - No file watcher: external edits after loading are overwritten on save.
 - The previous response stays visible when switching request.
 - Folder auth in _folder.yaml is ignored when sending (ApiArk does the same).
+- Disabled urlencoded rows are not stored (same as params and headers).
+- ApiArk sends a binary body's path as text, not the file.
 
 ## Build
 

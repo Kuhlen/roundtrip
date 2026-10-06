@@ -9,10 +9,11 @@ use std::path::{Path, PathBuf};
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
-use domain::http::{BodyKind, KeyValue, Method, Request};
+use domain::http::{Body, KeyValue, Method, Request};
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 
+use crate::body_file;
 use crate::{scalar, storage};
 
 pub struct CollectionDir;
@@ -79,21 +80,14 @@ impl CollectionStore for CollectionDir {
     fn read_request(&self, file: &Path) -> Result<Request, AppError> {
         let raw: RequestFile =
             serde_yaml::from_str(&read_checked(file)?).map_err(|e| invalid(file, e))?;
-        let (body_kind, body) = match raw.body {
-            Some(b) => match BodyKind::parse(&b.kind) {
-                // never shown, never written back
-                kind @ BodyKind::Unsupported(_) => (kind, String::new()),
-                kind => (kind, scalar(&b.content)),
-            },
-            None => (BodyKind::None, String::new()),
-        };
         Ok(Request {
             method: parse_method(&raw.method, file)?,
             url: raw.url,
             params: pairs(raw.params),
             headers: pairs(raw.headers),
-            body_kind,
-            body,
+            body: raw
+                .body
+                .map_or(Body::None, |b| body_file::parse(&b.kind, &b.content)),
             auth: parse_auth(raw.auth.as_ref()),
         })
     }
@@ -104,16 +98,19 @@ impl CollectionStore for CollectionDir {
         doc.insert("url".into(), request.url.as_str().into());
         set_pairs(&mut doc, "params", &request.params);
         set_pairs(&mut doc, "headers", &request.headers);
-        match &request.body_kind {
-            BodyKind::Unsupported(_) => {}
-            BodyKind::None => {
+        match &request.body {
+            Body::Unsupported(_) => {}
+            Body::None => {
                 doc.shift_remove("body");
             }
-            kind => {
-                let mut body = Mapping::new();
-                body.insert("type".into(), kind.as_str().into());
-                body.insert("content".into(), request.body.as_str().into());
-                doc.insert("body".into(), Value::Mapping(body));
+            body => {
+                let mut map = Mapping::new();
+                map.insert("type".into(), body.as_str().into());
+                map.insert(
+                    "content".into(),
+                    body_file::content(body).unwrap_or_default().into(),
+                );
+                doc.insert("body".into(), Value::Mapping(map));
             }
         }
         set_auth(&mut doc, request.auth.as_ref());

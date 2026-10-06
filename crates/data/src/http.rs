@@ -1,10 +1,13 @@
+use std::fs::File;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::http::{BodyKind, HttpSender, KeyValue, Request, Response};
+use domain::http::{Body, HttpSender, KeyValue, Request, Response};
 use reqwest::Url;
-use reqwest::blocking::Client;
+use reqwest::blocking::multipart::Form;
+use reqwest::blocking::{Client, RequestBuilder};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY: u64 = 10 * 1024 * 1024;
@@ -29,7 +32,7 @@ impl ReqwestSender {
 impl HttpSender for ReqwestSender {
     fn send(&self, request: &Request) -> Result<Response, AppError> {
         // A request that differs from the file is never sent
-        if let BodyKind::Unsupported(kind) = &request.body_kind {
+        if let Body::Unsupported(kind) = &request.body {
             return Err(AppError::Request(format!("{kind} body is not supported")));
         }
         if let Some(Auth::Unsupported(kind)) = &request.auth {
@@ -49,7 +52,12 @@ impl HttpSender for ReqwestSender {
         let method = reqwest::Method::from_bytes(request.method.as_str().as_bytes())
             .map_err(|e| AppError::Request(e.to_string()))?;
         let mut builder = self.client.request(method, url);
+        let multipart = matches!(request.body, Body::FormData(_));
         for h in request.headers.iter().filter(|h| h.is_active()) {
+            // multipart needs its own boundary in Content-Type
+            if multipart && h.key.eq_ignore_ascii_case("content-type") {
+                continue;
+            }
             builder = builder.header(&h.key, &h.value);
         }
         // upstream appends a second Authorization; a header the user wrote wins
@@ -75,13 +83,7 @@ impl HttpSender for ReqwestSender {
             }
             _ => {}
         }
-        if let Some(content_type) = request.body_kind.content_type() {
-            // upstream always appends, duplicating a user-set Content-Type
-            if !user_set("content-type") {
-                builder = builder.header("Content-Type", content_type);
-            }
-            builder = builder.body(request.body.clone());
-        }
+        builder = apply_body(builder, &request.body, user_set("content-type"))?;
 
         let start = Instant::now();
         let response = builder.send().map_err(classify)?;
@@ -122,6 +124,62 @@ fn build_url(base: &str, params: &[KeyValue]) -> Result<Url, AppError> {
         }
     }
     Ok(url)
+}
+
+fn apply_body(
+    builder: RequestBuilder,
+    body: &Body,
+    user_type: bool,
+) -> Result<RequestBuilder, AppError> {
+    // upstream always appends, duplicating a user-set Content-Type
+    let typed = |b: RequestBuilder, t: &str| {
+        if user_type {
+            b
+        } else {
+            b.header("Content-Type", t)
+        }
+    };
+    Ok(match body {
+        Body::None | Body::Unsupported(_) => builder,
+        Body::Text { kind, text } => typed(builder, kind.content_type()).body(text.clone()),
+        // .form() would overwrite a user-set Content-Type
+        Body::Urlencoded(rows) => {
+            let encoded = form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(
+                    rows.iter()
+                        .filter(|r| r.is_active())
+                        .map(|r| (&r.key, &r.value)),
+                )
+                .finish();
+            typed(builder, "application/x-www-form-urlencoded").body(encoded)
+        }
+        Body::FormData(fields) => {
+            let mut form = Form::new();
+            for f in fields.iter().filter(|f| f.is_active()) {
+                form = if f.is_file {
+                    form.file(f.key.clone(), file_path(&f.value)?)
+                        .map_err(|_| AppError::File(f.value.clone()))?
+                } else {
+                    form.text(f.key.clone(), f.value.clone())
+                };
+            }
+            builder.multipart(form)
+        }
+        Body::Binary(path) => {
+            let file = File::open(file_path(path)?).map_err(|_| AppError::File(path.clone()))?;
+            typed(builder, "application/octet-stream").body(file)
+        }
+    })
+}
+
+/// Empty, missing or a folder: reqwest would fail mid-send with a vague error.
+fn file_path(path: &str) -> Result<&Path, AppError> {
+    let p = Path::new(path);
+    if p.is_file() {
+        Ok(p)
+    } else {
+        Err(AppError::File(path.to_owned()))
+    }
 }
 
 /// Cut at a char boundary; upstream cut mid-char and fell back to "<binary>".

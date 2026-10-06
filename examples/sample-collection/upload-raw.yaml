@@ -1,0 +1,6 @@
+name: Upload raw
+method: POST
+url: '{{baseUrl}}/post'
+body:
+  type: binary
+  content: avatar.png

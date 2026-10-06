@@ -1,7 +1,6 @@
 mod auth_fields;
-mod collection_edit;
-mod request_form;
+mod request;
 mod send_flow;
-mod tree_actions;
+mod sidebar;
 pub mod workspace_controller;
 pub mod workspace_rules;

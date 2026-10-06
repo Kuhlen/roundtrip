@@ -1,0 +1,133 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Checkbox } from "../widgets/checkbox.slint";
+import { Field } from "../widgets/field.slint";
+
+// last row is the placeholder; typing into it adds a row
+export struct KvRow { enabled: bool, key: string, value: string, file: bool }
+
+export component KvTableView inherits Rectangle {
+    in property <[KvRow]> rows;
+    callback edited(int);
+    callback removed(int);
+    in property <bool> file-column;
+    callback pick-file(int);
+    // ListView's own preferred height is tiny; ask for every row, shrink only when space runs out
+    preferred-height: (root.rows.length + 1) * 32px + 2px;
+    max-height: self.preferred-height;
+    border-width: 1px;
+    border-color: Theme.line-soft;
+    border-radius: 6px;
+    clip: true;
+    VerticalLayout {
+        padding: 1px;
+        Rectangle {
+            height: 32px;
+            background: Theme.surface;
+            HorizontalLayout {
+                Rectangle { width: 30px; }
+                // same 10 px inset as the Field cells below
+                HorizontalLayout {
+                    horizontal-stretch: 10;
+                    padding-left: 10px;
+                    Text { text: "KEY"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    horizontal-stretch: 13;
+                    padding-left: 10px;
+                    Text { text: "VALUE"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                }
+                if root.file-column: Rectangle { width: 52px; }
+                Rectangle { width: 28px; }
+            }
+        }
+        ListView {
+            vertical-stretch: 1;
+            // std min (~50 px) left a gap under a lone placeholder row
+            min-height: 32px;
+            for row[i] in root.rows: line := Rectangle {
+                // controller keeps an empty row last; typing into it adds a row
+                property <bool> is-last: i == root.rows.length - 1;
+                height: 32px;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.line-soft;
+                }
+                HorizontalLayout {
+                    Rectangle {
+                        width: 30px;
+                        if !line.is-last: Checkbox {
+                            x: 8px;
+                            y: 9px;
+                            checked <=> row.enabled;
+                            toggled => { root.edited(i); }
+                        }
+                    }
+                    Field {
+                        horizontal-stretch: 10;
+                        framed: false;
+                        text <=> row.key;
+                        placeholder: "Key";
+                        struck: !row.enabled;
+                        edited => { root.edited(i); }
+                    }
+                    HorizontalLayout {
+                        horizontal-stretch: 13;
+                        Field {
+                            horizontal-stretch: 1;
+                            framed: false;
+                            text <=> row.value;
+                            placeholder: root.file-column && row.file ? "Path or {{var}}" : "Value";
+                            struck: !row.enabled;
+                            edited => { root.edited(i); }
+                        }
+                        if root.file-column && row.file: Rectangle {
+                            width: 28px;
+                            Text {
+                                text: "…";
+                                color: pick.has-hover ? Theme.accent : Theme.muted;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            pick := TouchArea {
+                                clicked => { root.pick-file(i); }
+                            }
+                        }
+                    }
+                    // a label, not a Select: a popup inside ListView rows gets clipped
+                    if root.file-column: Rectangle {
+                        width: 52px;
+                        if !line.is-last: Text {
+                            text: row.file ? "File" : "Text";
+                            font-size: 11px;
+                            color: kind.has-hover ? Theme.text : Theme.muted;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        kind := TouchArea {
+                            enabled: !line.is-last;
+                            clicked => {
+                                row.file = !row.file;
+                                root.edited(i);
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        if !line.is-last: Text {
+                            text: "×";
+                            color: del.has-hover ? Theme.err : Theme.faint;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        del := TouchArea {
+                            enabled: !line.is-last;
+                            clicked => { root.removed(i); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

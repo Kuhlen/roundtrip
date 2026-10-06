@@ -14,9 +14,14 @@ use domain::AppError;
 use domain::auth::Auth;
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::environment::{Environment, EnvironmentStore, Scope};
-use domain::http::{BodyKind, HttpSender, KeyValue, Method, Request, Response};
+use domain::http::{Body, HttpSender, KeyValue, Method, Request, Response, TextKind};
 use domain::session::{Session, SessionStore};
 use slint::{ComponentHandle, Model, ModelRc, SharedString};
+
+thread_local! {
+    /// what the fake file picker returns; None = cancelled
+    pub static PICKED: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
 
 pub const ROOT: &str = "/c";
 
@@ -397,8 +402,10 @@ pub fn fakes() -> Fakes {
             Ok(Request {
                 method: Method::Post,
                 url: "{{baseUrl}}/post".into(),
-                body_kind: BodyKind::Json,
-                body: r#"{"name":"Ayu"}"#.into(),
+                body: Body::Text {
+                    kind: TextKind::Json,
+                    text: r#"{"name":"Ayu"}"#.into(),
+                },
                 ..Request::default()
             }),
         ),
@@ -421,7 +428,7 @@ pub fn fakes() -> Fakes {
             Ok(Request {
                 method: Method::Post,
                 url: "{{baseUrl}}/post".into(),
-                body_kind: BodyKind::Unsupported("form-data".into()),
+                body: Body::Unsupported("form-data".into()),
                 ..Request::default()
             }),
         ),
@@ -450,6 +457,9 @@ pub fn build(f: &Fakes) -> (AppWindow, Rc<WorkspaceController>) {
         session: f.session.clone(),
         dynamic_var: |_| None,
         pretty_json: data::http::pretty_json,
+        pick_file: |_| PICKED.with(|p| p.borrow().clone()),
+        graphql_parse: data::graphql::parse,
+        graphql_json: data::graphql::to_json,
     };
     let controller = WorkspaceController::new(deps, &ui);
     (ui, controller)
@@ -508,4 +518,18 @@ pub fn kv(model: &ModelRc<KvRow>) -> Vec<(String, String, bool)> {
 
 pub fn set_collection_auth(f: &Fakes, auth: Option<Auth>) {
     f.collections.tree.borrow_mut().auth = auth;
+}
+
+/// Health check (row 3) becomes `request`, shown as `protocol`. Call before opening.
+pub fn set_health(f: &Fakes, request: Request, protocol: Protocol) {
+    f.collections
+        .files
+        .borrow_mut()
+        .insert(p("health.yaml"), Ok(request));
+    if let Node::Request {
+        protocol: shown, ..
+    } = &mut f.collections.tree.borrow_mut().children[1]
+    {
+        *shown = protocol;
+    }
 }

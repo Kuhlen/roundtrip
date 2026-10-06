@@ -1,0 +1,98 @@
+import { TextEdit } from "std-widgets.slint";
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, KvTable } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+import { Note } from "../../../widgets/note.slint";
+import { KvTableView } from "../../../snippets/kv_table.slint";
+
+// body-kind-index follows Body::KINDS: 0 none, 1-3 text, 4 urlencoded, 5 form-data, 6 binary
+export component BodyEditor inherits VerticalLayout {
+    property <int> kind: WorkspaceState.body-kind-index;
+    property <bool> editable: WorkspaceState.unsupported-body == "" && !WorkspaceState.graphql;
+    if WorkspaceState.graphql: VerticalLayout {
+        vertical-stretch: 1;
+        TextEdit {
+            vertical-stretch: 3;
+            text <=> WorkspaceState.gql-query;
+            font-family: Theme.mono;
+            font-size: 12px;
+            wrap: no-wrap;
+            edited(text) => { WorkspaceState.changed(); }
+        }
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 8px;
+            Text { text: "VARIABLES"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "Operation name"; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+            Field {
+                width: 160px;
+                text <=> WorkspaceState.gql-operation;
+                edited => { WorkspaceState.changed(); }
+            }
+        }
+        TextEdit {
+            vertical-stretch: 1;
+            text <=> WorkspaceState.gql-variables;
+            font-family: Theme.mono;
+            font-size: 12px;
+            wrap: no-wrap;
+            edited(text) => { WorkspaceState.changed(); }
+        }
+        if WorkspaceState.body-error != "": HorizontalLayout {
+            padding: 8px;
+            padding-left: 14px;
+            Text { text: "⚠ " + WorkspaceState.body-error; color: Theme.err; font-size: 12px; }
+        }
+    }
+    if WorkspaceState.unsupported-body != "": VerticalLayout {
+        alignment: start;
+        padding: 14px;
+        padding-top: 12px;
+        Note { text: WorkspaceState.body-note; }
+    }
+    if root.editable && (root.kind == 4 || root.kind == 5): VerticalLayout {
+        vertical-stretch: 1;
+        alignment: start;
+        padding: 14px;
+        padding-top: 12px;
+        KvTableView {
+            vertical-stretch: 1;
+            rows: WorkspaceState.form-rows;
+            file-column: root.kind == 5;
+            edited(i) => { WorkspaceState.kv-edited(KvTable.form, i); }
+            removed(i) => { WorkspaceState.kv-removed(KvTable.form, i); }
+            pick-file(i) => { WorkspaceState.pick-file(i); }
+        }
+    }
+    if root.editable && root.kind == 6: VerticalLayout {
+        alignment: start;
+        padding: 14px;
+        padding-top: 12px;
+        HorizontalLayout {
+            spacing: 8px;
+            Field {
+                horizontal-stretch: 1;
+                text <=> WorkspaceState.binary-path;
+                placeholder: "File path, relative to the collection";
+                edited => { WorkspaceState.changed(); }
+            }
+            Btn {
+                text: "Choose file…";
+                clicked => { WorkspaceState.pick-file(-1); }
+            }
+        }
+    }
+    if root.editable && root.kind <= 3: TextEdit {
+        vertical-stretch: 1;
+        text <=> WorkspaceState.body;
+        font-family: Theme.mono;
+        font-size: 12px;
+        wrap: no-wrap;
+        edited(text) => { WorkspaceState.changed(); }
+    }
+}

@@ -5,10 +5,10 @@ use std::thread::{self, JoinHandle};
 use data::http::{ReqwestSender, pretty_json};
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::http::{BodyKind, HttpSender, KeyValue, Method, Request};
+use domain::http::{Body, FormField, HttpSender, KeyValue, Method, Request, TextKind};
 
-/// One-shot local server: answers `response`, returns the raw request, lowercased.
-fn serve(response: Vec<u8>) -> (String, JoinHandle<String>) {
+/// One-shot local server: answers `response`, returns the raw request bytes.
+fn serve_raw(response: Vec<u8>) -> (String, JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let base = format!("http://{}", listener.local_addr().expect("addr"));
     let handle = thread::spawn(move || {
@@ -20,11 +20,16 @@ fn serve(response: Vec<u8>) -> (String, JoinHandle<String>) {
             buf.extend_from_slice(&chunk[..n]);
             if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
                 let head = String::from_utf8_lossy(&buf[..end]).to_lowercase();
-                let len = head
-                    .lines()
-                    .find_map(|l| l.strip_prefix("content-length:"))
-                    .map_or(0, |v| v.trim().parse::<usize>().expect("length"));
-                if buf.len() >= end + 4 + len {
+                let done = if head.contains("transfer-encoding: chunked") {
+                    buf.ends_with(b"0\r\n\r\n")
+                } else {
+                    let len = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .map_or(0, |v| v.trim().parse::<usize>().expect("length"));
+                    buf.len() >= end + 4 + len
+                };
+                if done {
                     break;
                 }
             }
@@ -33,9 +38,26 @@ fn serve(response: Vec<u8>) -> (String, JoinHandle<String>) {
             }
         }
         stream.write_all(&response).expect("write");
-        String::from_utf8_lossy(&buf).to_lowercase()
+        buf
     });
     (base, handle)
+}
+
+/// Same, request lowercased as text.
+fn serve(response: Vec<u8>) -> (String, JoinHandle<String>) {
+    let (base, raw) = serve_raw(response);
+    let handle =
+        thread::spawn(move || String::from_utf8_lossy(&raw.join().expect("server")).to_lowercase());
+    (base, handle)
+}
+
+fn post(base: String, body: Body) -> Request {
+    Request {
+        method: Method::Post,
+        url: base,
+        body,
+        ..Request::default()
+    }
 }
 
 fn reply(body: &[u8], extra_headers: &str) -> Vec<u8> {
@@ -103,8 +125,10 @@ fn content_type_is_not_duplicated() {
     let mut req = get(base);
     req.method = Method::Post;
     req.headers = vec![KeyValue::new("Content-Type", "application/vnd.api+json")];
-    req.body_kind = BodyKind::Json;
-    req.body = "{}".into();
+    req.body = Body::Text {
+        kind: TextKind::Json,
+        text: "{}".into(),
+    };
     ReqwestSender::new().unwrap().send(&req).unwrap();
     let raw = server.join().unwrap();
     assert_eq!(raw.matches("content-type:").count(), 1);
@@ -116,8 +140,10 @@ fn body_kind_sets_content_type_when_user_did_not() {
     let (base, server) = serve(reply(b"", ""));
     let mut req = get(base);
     req.method = Method::Post;
-    req.body_kind = BodyKind::Json;
-    req.body = "{}".into();
+    req.body = Body::Text {
+        kind: TextKind::Json,
+        text: "{}".into(),
+    };
     ReqwestSender::new().unwrap().send(&req).unwrap();
     assert!(
         server
@@ -154,7 +180,7 @@ fn url_without_scheme_is_invalid_url() {
 #[test]
 fn unsupported_body_is_never_sent() {
     let mut req = get("http://127.0.0.1:9/".into());
-    req.body_kind = BodyKind::Unsupported("form-data".into());
+    req.body = Body::Unsupported("form-data".into());
     assert!(matches!(
         ReqwestSender::new().unwrap().send(&req),
         Err(AppError::Request(_))
@@ -309,4 +335,105 @@ fn unsupported_auth_is_never_sent() {
         ReqwestSender::new().unwrap().send(&req),
         Err(AppError::Request(m)) if m == "oauth2 auth is not supported"
     ));
+}
+
+#[test]
+fn urlencoded_body_is_encoded() {
+    let (base, server) = serve(reply(b"", ""));
+    let req = post(
+        base,
+        Body::Urlencoded(vec![
+            KeyValue::new("q", "a b&c"),
+            KeyValue {
+                key: "off".into(),
+                value: "1".into(),
+                enabled: false,
+            },
+        ]),
+    );
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert!(raw.contains("content-type: application/x-www-form-urlencoded"));
+    assert!(raw.ends_with("\r\n\r\nq=a+b%26c"));
+}
+
+#[test]
+fn urlencoded_keeps_a_user_content_type() {
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = post(base, Body::Urlencoded(vec![KeyValue::new("a", "1")]));
+    req.headers = vec![KeyValue::new("Content-Type", "text/plain")];
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert_eq!(raw.matches("content-type:").count(), 1);
+    assert!(raw.contains("content-type: text/plain"));
+}
+
+#[test]
+fn form_data_sends_text_and_file_parts() {
+    let dir = tempfile::tempdir().unwrap();
+    let png = dir.path().join("a.png");
+    std::fs::write(&png, b"PNGDATA").unwrap();
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = post(
+        base,
+        Body::FormData(vec![
+            FormField::text("name", "Ana"),
+            FormField::file("avatar", png.to_str().unwrap()),
+        ]),
+    );
+    req.headers = vec![KeyValue::new("Content-Type", "text/plain")];
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert_eq!(
+        raw.matches("content-type: multipart/form-data; boundary=")
+            .count(),
+        1
+    );
+    assert!(!raw.contains("content-type: text/plain"));
+    assert!(raw.contains("content-disposition: form-data; name=\"name\"\r\n\r\nana"));
+    assert!(raw.contains(
+        "content-disposition: form-data; name=\"avatar\"; filename=\"a.png\"\r\ncontent-type: image/png\r\n\r\npngdata"
+    ));
+}
+
+#[test]
+fn binary_sends_file_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("b.bin");
+    std::fs::write(&bin, [0u8, 0xff, 0x10, b'A']).unwrap();
+    let (base, server) = serve_raw(reply(b"", ""));
+    let req = post(base, Body::Binary(bin.display().to_string()));
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert!(raw.ends_with(&[b'\r', b'\n', b'\r', b'\n', 0, 0xff, 0x10, b'A']));
+    assert!(
+        String::from_utf8_lossy(&raw)
+            .to_lowercase()
+            .contains("content-type: application/octet-stream")
+    );
+}
+
+#[test]
+fn bad_file_paths_are_file_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = [
+        String::new(),
+        dir.path().display().to_string(),
+        dir.path().join("nope.bin").display().to_string(),
+    ];
+    for path in paths {
+        let binary = post("http://127.0.0.1:9/".into(), Body::Binary(path.clone()));
+        assert_eq!(
+            ReqwestSender::new().unwrap().send(&binary).unwrap_err(),
+            AppError::File(path.clone())
+        );
+        let form = post(
+            "http://127.0.0.1:9/".into(),
+            Body::FormData(vec![FormField::file("f", path.clone())]),
+        );
+        assert_eq!(
+            ReqwestSender::new().unwrap().send(&form).unwrap_err(),
+            AppError::File(path)
+        );
+    }
 }

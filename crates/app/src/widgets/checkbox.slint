@@ -1,0 +1,44 @@
+import { Theme } from "../theme.slint";
+
+export component Checkbox inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled();
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.checked || fs.has-focus ? Theme.accent : Theme.line;
+    background: root.checked ? Theme.accent : transparent;
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.flip(); }
+    function flip() {
+        root.checked = !root.checked;
+        root.toggled();
+    }
+
+    if root.checked: Text {
+        text: "✓";
+        color: Theme.on-accent;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " {
+                root.flip();
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        clicked => {
+            fs.focus();
+            root.flip();
+        }
+    }
+}

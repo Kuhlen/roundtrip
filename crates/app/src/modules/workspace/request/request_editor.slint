@@ -1,97 +1,13 @@
-import { ListView, TextEdit } from "std-widgets.slint";
-import { Theme } from "../../theme.slint";
-import { WorkspaceState, KvRow, KvTable } from "workspace_state.slint";
-import { Btn, Checkbox, Field, Note, Select, Tab } from "controls.slint";
-import { AuthForm } from "auth_form.slint";
-
-component KvTableView inherits Rectangle {
-    in property <[KvRow]> rows;
-    in property <KvTable> table;
-    // ListView's own preferred height is tiny; ask for every row, shrink only when space runs out
-    preferred-height: (root.rows.length + 1) * 32px + 2px;
-    max-height: self.preferred-height;
-    border-width: 1px;
-    border-color: Theme.line-soft;
-    border-radius: 6px;
-    clip: true;
-    VerticalLayout {
-        padding: 1px;
-        Rectangle {
-            height: 32px;
-            background: Theme.surface;
-            HorizontalLayout {
-                Rectangle { width: 30px; }
-                // same 10 px inset as the Field cells below
-                HorizontalLayout {
-                    horizontal-stretch: 10;
-                    padding-left: 10px;
-                    Text { text: "KEY"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
-                }
-                HorizontalLayout {
-                    horizontal-stretch: 13;
-                    padding-left: 10px;
-                    Text { text: "VALUE"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
-                }
-                Rectangle { width: 28px; }
-            }
-        }
-        ListView {
-            vertical-stretch: 1;
-            // std min (~50 px) left a gap under a lone placeholder row
-            min-height: 32px;
-            for row[i] in root.rows: line := Rectangle {
-                // controller keeps an empty row last; typing into it adds a row
-                property <bool> is-last: i == root.rows.length - 1;
-                height: 32px;
-                Rectangle {
-                    y: 0;
-                    height: 1px;
-                    background: Theme.line-soft;
-                }
-                HorizontalLayout {
-                    Rectangle {
-                        width: 30px;
-                        if !line.is-last: Checkbox {
-                            x: 8px;
-                            y: 9px;
-                            checked <=> row.enabled;
-                            toggled => { WorkspaceState.kv-edited(root.table, i); }
-                        }
-                    }
-                    Field {
-                        horizontal-stretch: 10;
-                        framed: false;
-                        text <=> row.key;
-                        placeholder: "Key";
-                        struck: !row.enabled;
-                        edited => { WorkspaceState.kv-edited(root.table, i); }
-                    }
-                    Field {
-                        horizontal-stretch: 13;
-                        framed: false;
-                        text <=> row.value;
-                        placeholder: "Value";
-                        struck: !row.enabled;
-                        edited => { WorkspaceState.kv-edited(root.table, i); }
-                    }
-                    Rectangle {
-                        width: 28px;
-                        if !line.is-last: Text {
-                            text: "×";
-                            color: del.has-hover ? Theme.err : Theme.faint;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        del := TouchArea {
-                            enabled: !line.is-last;
-                            clicked => { WorkspaceState.kv-removed(root.table, i); }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, KvTable } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+import { Note } from "../../../widgets/note.slint";
+import { BodyEditor } from "body_editor.slint";
+import { Select } from "../../../widgets/select.slint";
+import { Tab } from "../../../widgets/tab.slint";
+import { AuthForm } from "../../../snippets/auth_form.slint";
+import { KvTableView } from "../../../snippets/kv_table.slint";
 
 // spans the editor and response columns
 export component RequestHeader inherits Rectangle {
@@ -198,8 +114,8 @@ export component RequestEditor inherits Rectangle {
                     clicked => { WorkspaceState.editor-tab = 1; }
                 }
                 Tab {
-                    text: "Body";
-                    count: WorkspaceState.unsupported-body;
+                    text: WorkspaceState.graphql ? "Query" : "Body";
+                    count: WorkspaceState.unsupported-body != "" ? WorkspaceState.unsupported-body : WorkspaceState.body-count > 0 ? "\{WorkspaceState.body-count}" : "";
                     active: WorkspaceState.editor-tab == 2;
                     clicked => { WorkspaceState.editor-tab = 2; }
                 }
@@ -210,10 +126,10 @@ export component RequestEditor inherits Rectangle {
                     clicked => { WorkspaceState.editor-tab = 3; }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": VerticalLayout {
+                if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "" && !WorkspaceState.graphql: VerticalLayout {
                     alignment: center;
                     Select {
-                        width: 96px;
+                        width: 112px;
                         small: true;
                         font-family: Theme.mono;
                         font-size: 12px;
@@ -237,7 +153,8 @@ export component RequestEditor inherits Rectangle {
             KvTableView {
                 vertical-stretch: 1;
                 rows: WorkspaceState.params;
-                table: KvTable.params;
+                edited(i) => { WorkspaceState.kv-edited(KvTable.params, i); }
+                removed(i) => { WorkspaceState.kv-removed(KvTable.params, i); }
             }
         }
         if WorkspaceState.editor-tab == 1: VerticalLayout {
@@ -248,15 +165,9 @@ export component RequestEditor inherits Rectangle {
             KvTableView {
                 vertical-stretch: 1;
                 rows: WorkspaceState.headers;
-                table: KvTable.headers;
+                edited(i) => { WorkspaceState.kv-edited(KvTable.headers, i); }
+                removed(i) => { WorkspaceState.kv-removed(KvTable.headers, i); }
             }
-        }
-        if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body != "": VerticalLayout {
-            vertical-stretch: 1;
-            alignment: start;
-            padding: 14px;
-            padding-top: 12px;
-            Note { text: WorkspaceState.unsupported-body + " body: not supported yet. Saving leaves it as it is in the file."; }
         }
         if WorkspaceState.editor-tab == 3: VerticalLayout {
             vertical-stretch: 1;
@@ -272,13 +183,6 @@ export component RequestEditor inherits Rectangle {
                 open-settings => { WorkspaceState.open-settings(); }
             }
         }
-        if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": TextEdit {
-            vertical-stretch: 1;
-            text <=> WorkspaceState.body;
-            font-family: Theme.mono;
-            font-size: 12px;
-            wrap: no-wrap;
-            edited(text) => { WorkspaceState.changed(); }
-        }
+        if WorkspaceState.editor-tab == 2: BodyEditor { vertical-stretch: 1; }
     }
 }

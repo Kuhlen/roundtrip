@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, flatten, format_size, inherit_note, interpolate_request, resolved_url,
-    row_label,
+    RowKind, error_text, flatten, format_size, inherit_note, interpolate_request, resolve_files,
+    resolved_url, row_label, unsupported_body_note,
 };
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Node, Protocol};
-use domain::http::{BodyKind, KeyValue, Method, Request};
+use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
 
 fn request(name: &str, path: &str) -> Node {
     Node::Request {
@@ -123,8 +123,10 @@ fn interpolate_request_fills_every_text_field() {
             value: "Bearer {{token}}".into(),
             enabled: false,
         }],
-        body_kind: BodyKind::Json,
-        body: r#"{"id":"{{id}}"}"#.into(),
+        body: Body::Text {
+            kind: TextKind::Json,
+            text: r#"{"id":"{{id}}"}"#.into(),
+        },
         auth: None,
     };
     let out = interpolate_request(
@@ -148,8 +150,10 @@ fn interpolate_request_fills_every_text_field() {
                 value: "Bearer t".into(),
                 enabled: false
             }],
-            body_kind: BodyKind::Json,
-            body: r#"{"id":"7"}"#.into(),
+            body: Body::Text {
+                kind: TextKind::Json,
+                text: r#"{"id":"7"}"#.into(),
+            },
             auth: None,
         }
     );
@@ -250,6 +254,65 @@ fn resolved_url_shows_a_query_api_key() {
 }
 
 #[test]
+fn resolve_files_joins_relative_paths_only() {
+    let mut req = Request {
+        body: Body::FormData(vec![
+            FormField::file("a", "img/a.png"),
+            FormField::file("b", "/abs/b.png"),
+            FormField::file("c", ""),
+            FormField::text("t", "img/t.png"),
+        ]),
+        ..Request::default()
+    };
+    resolve_files(&mut req, Path::new("/c"));
+    assert_eq!(
+        req.body,
+        Body::FormData(vec![
+            FormField::file("a", Path::new("/c").join("img/a.png").display().to_string()),
+            FormField::file("b", "/abs/b.png"),
+            FormField::file("c", ""),
+            FormField::text("t", "img/t.png"),
+        ])
+    );
+    let mut bin = Request {
+        body: Body::Binary("x.bin".into()),
+        ..Request::default()
+    };
+    resolve_files(&mut bin, Path::new("/c"));
+    assert_eq!(
+        bin.body,
+        Body::Binary(Path::new("/c").join("x.bin").display().to_string())
+    );
+}
+
+#[test]
+fn unsupported_note_tells_unreadable_from_unknown() {
+    assert_eq!(
+        unsupported_body_note("form-data"),
+        "form-data body: Roundtrip can't read this content. Saving leaves it as it is in the file."
+    );
+    assert_eq!(
+        unsupported_body_note("graphql"),
+        "graphql body: not supported yet. Saving leaves it as it is in the file."
+    );
+}
+
+#[test]
+fn file_errors_name_the_fix() {
+    assert_eq!(
+        error_text(&AppError::File(String::new()), None),
+        (
+            "No file chosen".to_string(),
+            "Pick a file in the Body tab.".to_string()
+        )
+    );
+    assert_eq!(
+        error_text(&AppError::File("/x.png".into()), None).0,
+        "Cannot read file"
+    );
+}
+
+#[test]
 fn inherit_note_names_the_collection_auth() {
     assert_eq!(
         inherit_note(None),
@@ -262,5 +325,38 @@ fn inherit_note_names_the_collection_auth() {
     assert_eq!(
         inherit_note(Some(&Auth::Unsupported("oauth2".into()))),
         "Uses the collection auth: oauth2, not supported yet."
+    );
+}
+
+#[test]
+fn interpolate_request_fills_form_fields_and_paths() {
+    let lookup = vars(&[("k", "a"), ("v", "b"), ("dir", "/d")]);
+    let out = |body| {
+        interpolate_request(
+            &Request {
+                body,
+                ..Request::default()
+            },
+            &lookup,
+        )
+        .body
+    };
+    assert_eq!(
+        out(Body::Urlencoded(vec![KeyValue::new("{{k}}", "{{v}}")])),
+        Body::Urlencoded(vec![KeyValue::new("a", "b")])
+    );
+    assert_eq!(
+        out(Body::FormData(vec![
+            FormField::text("{{k}}", "{{v}}"),
+            FormField::file("f", "{{dir}}/a.png"),
+        ])),
+        Body::FormData(vec![
+            FormField::text("a", "b"),
+            FormField::file("f", "/d/a.png"),
+        ])
+    );
+    assert_eq!(
+        out(Body::Binary("{{dir}}/x.bin".into())),
+        Body::Binary("/d/x.bin".into())
     );
 }

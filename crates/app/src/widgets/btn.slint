@@ -1,0 +1,80 @@
+import { Theme } from "../theme.slint";
+
+export component Btn inherits Rectangle {
+    in property <string> text;
+    // kbd hint after the label, e.g. "Ctrl ⏎"
+    in property <string> hint;
+    in property <bool> primary;
+    in property <bool> ghost;
+    in property <bool> small;
+    in property <bool> enabled: true;
+    in property <color> text-color: Theme.text;
+    callback clicked();
+    property <color> fg: root.primary ? Theme.on-accent : root.text-color;
+    property <length> pad: root.primary ? 18px : root.small ? 10px : 12px;
+    height: root.small ? 26px : 34px;
+    horizontal-stretch: 0;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.primary ? Theme.accent : Theme.line;
+    background: root.primary ? Theme.accent : root.ghost ? transparent : Theme.raised;
+    opacity: root.enabled ? 1 : 0.45;
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: root.pad;
+        padding-right: root.pad;
+        spacing: 6px;
+        alignment: center;
+        Text {
+            text: root.text;
+            color: root.fg;
+            font-size: root.small ? 12px : 13px;
+            font-weight: root.primary ? 600 : 500;
+            vertical-alignment: center;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            color: root.fg;
+            opacity: 0.7;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: !root.enabled ? transparent : touch.pressed ? #00000026 : touch.has-hover ? #ffffff10 : transparent;
+    }
+    // drawn on top so a caller border-color can't hide it
+    if fs.has-focus: Rectangle {
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.primary ? Theme.text : Theme.accent;
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
+    }
+}

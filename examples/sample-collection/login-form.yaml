@@ -1,0 +1,6 @@
+name: Login form
+method: POST
+url: '{{baseUrl}}/post'
+body:
+  type: urlencoded
+  content: grant_type=password&token={{token}}

@@ -5,7 +5,7 @@ use data::collection_dir::CollectionDir;
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{CollectionStore, Node, Protocol};
-use domain::http::{BodyKind, KeyValue, Method, Request};
+use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
 use serde_yaml::Value;
 
 fn write(root: &Path, rel: &str, text: &str) {
@@ -138,8 +138,10 @@ fn read_request_keeps_file_order() {
             url: "{{baseUrl}}/post".into(),
             params: vec![KeyValue::new("page", "2")],
             headers: vec![KeyValue::new("X-B", "2"), KeyValue::new("X-A", "1")],
-            body_kind: BodyKind::Json,
-            body: r#"{"a":1}"#.into(),
+            body: Body::Text {
+                kind: TextKind::Json,
+                text: r#"{"a":1}"#.into(),
+            },
             auth: None,
         }
     );
@@ -233,7 +235,7 @@ fn save_drops_disabled_rows_empty_maps_and_none_body() {
     );
     let mut req = CollectionDir.read_request(&file).unwrap();
     req.params[0].enabled = false;
-    req.body_kind = BodyKind::None;
+    req.body = Body::None;
     CollectionDir.save_request(&file, &req).unwrap();
     let doc = reload(&file);
     assert!(doc.get("params").is_none());
@@ -250,7 +252,7 @@ fn save_leaves_unsupported_body_untouched() {
         "name: U\nmethod: POST\nurl: http://a\nbody:\n  type: form-data\n  content:\n    - key: a\n      value: '1'\n",
     );
     let mut req = CollectionDir.read_request(&file).unwrap();
-    assert_eq!(req.body_kind, BodyKind::Unsupported("form-data".into()));
+    assert_eq!(req.body, Body::Unsupported("form-data".into()));
     req.url = "http://b".into();
     CollectionDir.save_request(&file, &req).unwrap();
     let doc = reload(&file);
@@ -296,7 +298,10 @@ fn save_writes_edited_json_body() {
         "name: J\nmethod: POST\nurl: http://a\nbody:\n  type: json\n  content: '{\"a\":1}'\n",
     );
     let mut req = CollectionDir.read_request(&file).unwrap();
-    req.body = "{\"b\": 2}".into();
+    req.body = Body::Text {
+        kind: TextKind::Json,
+        text: "{\"b\": 2}".into(),
+    };
     CollectionDir.save_request(&file, &req).unwrap();
     let doc = reload(&file);
     assert_eq!(doc["body"]["type"], "json");
@@ -586,4 +591,133 @@ fn rename_with_a_conflicted_file_changes_nothing() {
     ));
     assert!(r.join("old.yaml").exists());
     assert!(!r.join("new.yaml").exists());
+}
+
+fn body_of(yaml_body: &str) -> Body {
+    let dir = collection();
+    write(
+        dir.path(),
+        "r.yaml",
+        &format!("name: R\nmethod: POST\nurl: http://a\nbody:\n{yaml_body}"),
+    );
+    CollectionDir
+        .read_request(&dir.path().join("r.yaml"))
+        .expect("read")
+        .body
+}
+
+/// Saves `body` into a fresh request; returns the written content and the body read back.
+fn saved_content(body: Body) -> (String, Body) {
+    let dir = collection();
+    let file = dir.path().join("r.yaml");
+    write(dir.path(), "r.yaml", OK);
+    let mut req = CollectionDir.read_request(&file).expect("read");
+    req.body = body;
+    CollectionDir.save_request(&file, &req).expect("save");
+    let content = reload(&file)["body"]["content"]
+        .as_str()
+        .expect("content")
+        .to_owned();
+    (
+        content,
+        CollectionDir.read_request(&file).expect("reread").body,
+    )
+}
+
+#[test]
+fn urlencoded_reads_rows() {
+    assert_eq!(
+        body_of("  type: urlencoded\n  content: a=1&b=x+y%26z&c=\n"),
+        Body::Urlencoded(vec![
+            KeyValue::new("a", "1"),
+            KeyValue::new("b", "x y&z"),
+            KeyValue::new("c", ""),
+        ])
+    );
+}
+
+#[test]
+fn urlencoded_round_trips_reserved_chars() {
+    let rows = vec![
+        KeyValue::new("q", "a b&c=d+e é"),
+        KeyValue::new("user", "{{user}}"),
+    ];
+    let (content, back) = saved_content(Body::Urlencoded(rows.clone()));
+    assert_eq!(content, "q=a+b%26c%3Dd%2Be+%C3%A9&user={{user}}");
+    assert_eq!(back, Body::Urlencoded(rows));
+}
+
+#[test]
+fn form_data_reads_postman_shape() {
+    assert_eq!(
+        body_of("  type: form-data\n  content: '[{\"key\": \"name\", \"value\": \"Ana\"}]'\n"),
+        Body::FormData(vec![FormField::text("name", "Ana")])
+    );
+}
+
+#[test]
+fn form_data_writes_flags_only_when_not_default() {
+    let fields = vec![
+        FormField::text("name", "Ana"),
+        FormField::file("avatar", "img/a.png"),
+        FormField {
+            enabled: false,
+            ..FormField::text("debug", "1")
+        },
+    ];
+    let (content, back) = saved_content(Body::FormData(fields.clone()));
+    assert_eq!(
+        content,
+        "[\n  {\n    \"key\": \"name\",\n    \"value\": \"Ana\"\n  },\n  {\n    \"key\": \"avatar\",\n    \"value\": \"img/a.png\",\n    \"type\": \"file\"\n  },\n  {\n    \"key\": \"debug\",\n    \"value\": \"1\",\n    \"enabled\": false\n  }\n]"
+    );
+    assert_eq!(back, Body::FormData(fields));
+}
+
+#[test]
+fn empty_form_data_round_trips() {
+    let (content, back) = saved_content(Body::FormData(vec![]));
+    assert_eq!(content, "[]");
+    assert_eq!(back, Body::FormData(vec![]));
+}
+
+#[test]
+fn binary_path_is_kept_as_is() {
+    let (content, back) = saved_content(Body::Binary("{{dir}}/a b.png".into()));
+    assert_eq!(content, "{{dir}}/a b.png");
+    assert_eq!(back, Body::Binary("{{dir}}/a b.png".into()));
+}
+
+#[test]
+fn unreadable_form_content_is_left_untouched() {
+    let bodies = [
+        "  type: form-data\n  content: avatar=@avatar.png\n",
+        "  type: urlencoded\n  content: |\n    a: 1\n    b: 2\n",
+        "  type: urlencoded\n  content: 'a: 1'\n",
+    ];
+    for body in bodies {
+        let dir = collection();
+        let file = dir.path().join("r.yaml");
+        let yaml = format!("name: R\nmethod: POST\nurl: http://a\nbody:\n{body}");
+        write(dir.path(), "r.yaml", &yaml);
+        let mut req = CollectionDir.read_request(&file).unwrap();
+        assert!(matches!(req.body, Body::Unsupported(_)), "{body}");
+        req.url = "http://b".into();
+        CollectionDir.save_request(&file, &req).unwrap();
+        let before: Value = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(reload(&file)["body"], before["body"], "{body}");
+    }
+}
+
+#[test]
+fn form_data_with_unknown_field_keys_is_left_untouched() {
+    let dir = collection();
+    let file = dir.path().join("r.yaml");
+    let yaml = "name: R\nmethod: POST\nurl: http://a\nbody:\n  type: form-data\n  content: '[{\"key\": \"a\", \"value\": \"1\", \"description\": \"x\"}]'\n";
+    write(dir.path(), "r.yaml", yaml);
+    let mut req = CollectionDir.read_request(&file).unwrap();
+    assert_eq!(req.body, Body::Unsupported("form-data".into()));
+    req.url = "http://b".into();
+    CollectionDir.save_request(&file, &req).unwrap();
+    let before: Value = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(reload(&file)["body"], before["body"]);
 }

@@ -1,0 +1,34 @@
+import { Theme } from "../theme.slint";
+
+export component Tab inherits Rectangle {
+    in property <string> text;
+    // "" hides it (Params with no active rows)
+    in property <string> count;
+    in property <bool> active;
+    callback clicked();
+    horizontal-stretch: 0;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Text { text: root.text; color: root.active ? Theme.text : Theme.muted; vertical-alignment: center; }
+        if root.count != "": Text {
+            text: root.count;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            color: Theme.faint;
+            vertical-alignment: center;
+        }
+    }
+    if root.active: Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: Theme.accent;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

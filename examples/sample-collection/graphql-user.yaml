@@ -1,0 +1,12 @@
+name: GraphQL user
+method: POST
+url: '{{baseUrl}}/post'
+body:
+  type: json
+  content: |-
+    {
+      "query": "query User($id: ID!) { user(id: $id) { name } }",
+      "variables": {
+        "id": "1"
+      }
+    }

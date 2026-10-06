@@ -9,13 +9,13 @@ use domain::http::Method;
 use domain::session::Session;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
-use super::send_flow::reset_response;
-use super::workspace_controller::{Active, PendingAction, WorkspaceController};
-use super::workspace_rules::{self, FlatRow, RowKind};
+use crate::modules::workspace::send_flow::reset_response;
+use crate::modules::workspace::workspace_controller::{Active, PendingAction, WorkspaceController};
+use crate::modules::workspace::workspace_rules::{self, FlatRow, RowKind};
 use crate::ui::{SendStatus, TreeRow, WorkspaceState};
 
 impl WorkspaceController {
-    pub(super) fn show_collection(&self, collection: Collection, environment: Option<&str>) {
+    pub(crate) fn show_collection(&self, collection: Collection, environment: Option<&str>) {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
         // stale banner from the previous open; load_environments may set a new one
@@ -36,7 +36,7 @@ impl WorkspaceController {
         self.save_session();
     }
 
-    pub(super) fn ask_open_collection(&self) {
+    pub(crate) fn ask_open_collection(&self) {
         if self.is_dirty() {
             self.ask(PendingAction::OpenCollection);
         } else {
@@ -44,7 +44,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn pick_collection(&self) {
+    pub(crate) fn pick_collection(&self) {
         // sync dialog on the UI thread
         if let Some(dir) = rfd::FileDialog::new()
             .set_title("Open collection")
@@ -54,7 +54,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn load_environments(&self, preferred: Option<&str>) {
+    pub(crate) fn load_environments(&self, preferred: Option<&str>) {
         let Some(root) = self.root() else { return };
         let envs = self.deps.environments.list(&root).unwrap_or_else(|e| {
             self.banner(&e);
@@ -83,13 +83,13 @@ impl WorkspaceController {
         self.envs.borrow().get(i).map(|e| e.name.clone())
     }
 
-    pub(super) fn environment_selected(&self) {
+    pub(crate) fn environment_selected(&self) {
         self.refresh_vars();
         self.save_session();
         self.changed();
     }
 
-    pub(super) fn refresh_vars(&self) {
+    pub(crate) fn refresh_vars(&self) {
         let vars = match (self.root(), self.active_environment()) {
             (Some(root), Some(name)) => self
                 .deps
@@ -104,7 +104,7 @@ impl WorkspaceController {
         *self.vars.borrow_mut() = vars;
     }
 
-    pub(super) fn lookup(&self, name: &str) -> Option<String> {
+    pub(crate) fn lookup(&self, name: &str) -> Option<String> {
         self.vars
             .borrow()
             .get(name)
@@ -112,14 +112,14 @@ impl WorkspaceController {
             .or_else(|| (self.deps.dynamic_var)(name))
     }
 
-    pub(super) fn save_session(&self) {
+    pub(crate) fn save_session(&self) {
         self.deps.session.save(&Session {
             last_collection: self.root(),
             last_environment: self.active_environment(),
         });
     }
 
-    pub(super) fn refresh_tree(&self) {
+    pub(crate) fn refresh_tree(&self) {
         let rows = self
             .collection
             .borrow()
@@ -158,7 +158,7 @@ impl WorkspaceController {
     }
 
     /// Re-scan after a tree edit; collapsed folders and the active request stay.
-    pub(super) fn reload_collection(&self) {
+    pub(crate) fn reload_collection(&self) {
         let Some(root) = self.root() else { return };
         match self.deps.collections.load(&root) {
             Ok(c) => *self.collection.borrow_mut() = Some(c),
@@ -167,13 +167,13 @@ impl WorkspaceController {
         self.refresh_tree();
     }
 
-    pub(super) fn row(&self, index: i32) -> Option<FlatRow> {
+    pub(crate) fn row(&self, index: i32) -> Option<FlatRow> {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.rows.borrow().get(i).cloned())
     }
 
-    pub(super) fn row_clicked(&self, index: i32) {
+    pub(crate) fn row_clicked(&self, index: i32) {
         // a click may not rebuild the tree; clear the rename row now
         self.rename_cancel();
         let Some(row) = self.row(index) else { return };
@@ -191,7 +191,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn select_request(&self, path: PathBuf) {
+    pub(crate) fn select_request(&self, path: PathBuf) {
         if self
             .active
             .borrow()
@@ -207,7 +207,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn load_request(&self, path: &Path) {
+    pub(crate) fn load_request(&self, path: &Path) {
         let row = self.rows.borrow().iter().find(|r| r.path == path).cloned();
         let Some(FlatRow {
             name,
@@ -231,7 +231,7 @@ impl WorkspaceController {
 }
 
 // sidebar label reads the method from the tree, not the saved file
-pub(super) fn set_method(nodes: &mut [Node], file: &Path, new: Method) {
+pub(crate) fn set_method(nodes: &mut [Node], file: &Path, new: Method) {
     for n in nodes {
         match n {
             Node::Request { method, path, .. } if path == file => *method = new,

@@ -1,0 +1,83 @@
+import { Theme } from "../theme.slint";
+
+export component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> enabled <=> input.enabled;
+    // false = bare cell inside the key/value table
+    in property <bool> framed: true;
+    // disabled key/value row; Text has no strikethrough, so draw one
+    in property <bool> struck;
+    callback edited();
+    callback accepted();
+    out property <bool> has-focus: input.has-focus;
+    property <length> pad: root.framed ? 12px : 10px;
+    height: root.framed ? 34px : 32px;
+    border-radius: root.framed ? 6px : 0;
+    border-width: root.framed ? 1px : 0;
+    background: root.framed || input.has-focus ? Theme.raised : transparent;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
+    opacity: root.enabled ? 1 : 0.45;
+    clip: true;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-value: root.text;
+    accessible-placeholder-text: root.placeholder;
+
+    if root.text == "": Text {
+        x: root.pad;
+        width: parent.width - 2 * root.pad;
+        text: root.placeholder;
+        font-family: Theme.mono;
+        font-size: 12px;
+        color: Theme.faint;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    Rectangle {
+        x: root.pad;
+        width: parent.width - 2 * root.pad;
+        clip: true;
+        input := TextInput {
+            // same trick as std LineEditBase: shift so the cursor stays visible
+            property <length> computed-x;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            single-line: true;
+            vertical-alignment: center;
+            font-family: Theme.mono;
+            font-size: root.framed ? 12.5px : 12px;
+            color: root.struck ? Theme.faint : Theme.text;
+            selection-background-color: Theme.accent-soft;
+            selection-foreground-color: Theme.text;
+            accessible-role: none;
+            cursor-position-changed(pos) => {
+                if pos.x + self.computed-x < 0 {
+                    self.computed-x = -pos.x;
+                } else if pos.x + self.computed-x > parent.width - self.text-cursor-width {
+                    self.computed-x = parent.width - pos.x - self.text-cursor-width;
+                }
+            }
+            edited => {
+                root.edited();
+            }
+            accepted => {
+                root.accepted();
+            }
+        }
+        if root.struck: Rectangle {
+            y: parent.height / 2;
+            x: input.x;
+            width: min(parent.width, input.preferred-width);
+            height: 1px;
+            background: Theme.faint;
+        }
+    }
+
+    public function select-all() {
+        input.select-all();
+    }
+}

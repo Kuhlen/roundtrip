@@ -1,7 +1,8 @@
 import { ListView, TextEdit } from "std-widgets.slint";
 import { Theme } from "../../theme.slint";
 import { WorkspaceState, SendStatus, StatusClass } from "workspace_state.slint";
-import { Tab, Toggle } from "controls.slint";
+import { Tab } from "../../widgets/tab.slint";
+import { Toggle } from "../../widgets/toggle.slint";
 
 component Pill inherits Rectangle {
     in property <string> text;

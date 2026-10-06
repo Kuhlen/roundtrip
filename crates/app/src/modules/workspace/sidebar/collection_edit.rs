@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 use domain::AppError;
 use slint::ComponentHandle;
 
-use super::auth_fields::{auth_fields, auth_from_fields};
-use super::workspace_controller::{PendingAction, WorkspaceController};
-use super::workspace_rules::RowKind;
+use crate::modules::workspace::auth_fields::{auth_fields, auth_from_fields};
+use crate::modules::workspace::workspace_controller::{PendingAction, WorkspaceController};
+use crate::modules::workspace::workspace_rules::RowKind;
 use crate::ui::{DialogKind, WorkspaceState};
 
 impl WorkspaceController {
-    pub(super) fn open_settings(&self) {
+    pub(crate) fn open_settings(&self) {
         let auth = self
             .collection
             .borrow()
@@ -24,7 +24,7 @@ impl WorkspaceController {
         s.set_settings_open(true);
     }
 
-    pub(super) fn save_settings(&self) {
+    pub(crate) fn save_settings(&self) {
         let Some(root) = self.root() else { return };
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
@@ -53,7 +53,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn close_settings(&self) {
+    pub(crate) fn close_settings(&self) {
         self.ui()
             .global::<WorkspaceState>()
             .set_settings_open(false);
@@ -71,7 +71,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn create(&self, index: i32, folder: bool) {
+    pub(crate) fn create(&self, index: i32, folder: bool) {
         let Some(dir) = self.target_dir(index) else {
             return;
         };
@@ -108,20 +108,20 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn rename_start(&self, index: i32) {
+    pub(crate) fn rename_start(&self, index: i32) {
         if let Some(row) = self.row(index) {
             *self.editing.borrow_mut() = Some(row.path);
             self.refresh_tree();
         }
     }
 
-    pub(super) fn rename_cancel(&self) {
+    pub(crate) fn rename_cancel(&self) {
         if self.editing.borrow_mut().take().is_some() {
             self.refresh_tree();
         }
     }
 
-    pub(super) fn rename_commit(&self, text: &str) {
+    pub(crate) fn rename_commit(&self, text: &str) {
         let Some(old) = self.editing.borrow_mut().take() else {
             return;
         };
@@ -184,7 +184,7 @@ impl WorkspaceController {
         }
     }
 
-    pub(super) fn ask_delete(&self, index: i32) {
+    pub(crate) fn ask_delete(&self, index: i32) {
         let Some(row) = self.row(index) else { return };
         let root = self.root().unwrap_or_default();
         let rel = row.path.strip_prefix(&root).unwrap_or(&row.path);
@@ -199,7 +199,7 @@ impl WorkspaceController {
     }
 
     /// No unsaved prompt for the active request: its file is gone.
-    pub(super) fn delete(&self, path: &Path) {
+    pub(crate) fn delete(&self, path: &Path) {
         match self.deps.collections.delete(path) {
             Ok(()) => {
                 let gone = self

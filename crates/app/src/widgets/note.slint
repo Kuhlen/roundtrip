@@ -1,0 +1,16 @@
+import { Theme } from "../theme.slint";
+
+// solid border: Slint has no dashed borders
+export component Note inherits Rectangle {
+    in property <string> text;
+    border-width: 1px;
+    border-color: Theme.line;
+    border-radius: 6px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        Text { text: root.text; color: Theme.muted; wrap: word-wrap; }
+    }
+}

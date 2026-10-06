@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Node, Protocol};
-use domain::http::{KeyValue, Method, Request};
+use domain::http::{Body, FormField, KeyValue, Method, Request};
 use domain::interpolation::interpolate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,22 +149,41 @@ pub fn inherit_note(collection: Option<&Auth>) -> String {
 }
 
 pub fn interpolate_request(request: &Request, lookup: impl Fn(&str) -> Option<String>) -> Request {
+    let text = |t: &str| interpolate(t, &lookup);
     let rows = |rows: &[KeyValue]| -> Vec<KeyValue> {
         rows.iter()
             .map(|r| KeyValue {
-                key: interpolate(&r.key, &lookup),
-                value: interpolate(&r.value, &lookup),
+                key: text(&r.key),
+                value: text(&r.value),
                 enabled: r.enabled,
             })
             .collect()
     };
+    let body = match &request.body {
+        Body::Text { kind, text: t } => Body::Text {
+            kind: *kind,
+            text: text(t),
+        },
+        Body::Urlencoded(r) => Body::Urlencoded(rows(r)),
+        Body::FormData(fields) => Body::FormData(
+            fields
+                .iter()
+                .map(|f| FormField {
+                    key: text(&f.key),
+                    value: text(&f.value),
+                    ..f.clone()
+                })
+                .collect(),
+        ),
+        Body::Binary(path) => Body::Binary(text(path)),
+        Body::None | Body::Unsupported(_) => request.body.clone(),
+    };
     Request {
         method: request.method,
-        url: interpolate(&request.url, &lookup),
+        url: text(&request.url),
         params: rows(&request.params),
         headers: rows(&request.headers),
-        body_kind: request.body_kind.clone(),
-        body: interpolate(&request.body, &lookup),
+        body,
         auth: request.auth.as_ref().map(|a| match a {
             Auth::Bearer { token } => Auth::Bearer {
                 token: interpolate(token, &lookup),
@@ -238,9 +257,46 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
                 "Use a non-empty name that does not start with a dot and is not _folder.".into(),
             );
         }
+        AppError::File(path) if path.is_empty() => {
+            ("No file chosen".into(), "Pick a file in the Body tab.")
+        }
+        AppError::File(_) => ("Cannot read file".into(), "Check the path in the Body tab."),
+        AppError::InvalidJson(_) => (
+            "Variables: invalid JSON".into(),
+            "Fix Variables before saving.",
+        ),
         AppError::Storage(msg) => return ("Could not read or write a file".into(), msg.clone()),
     };
     (title, hint.into())
+}
+
+/// Relative paths point into the collection, so the same file works on every machine.
+pub fn resolve_files(request: &mut Request, root: &Path) {
+    let resolve = |p: &mut String| {
+        // empty stays empty: the sender reports "no file chosen"
+        if !p.is_empty() && Path::new(p.as_str()).is_relative() {
+            *p = root.join(&*p).display().to_string();
+        }
+    };
+    match &mut request.body {
+        Body::Binary(path) => resolve(path),
+        Body::FormData(fields) => fields
+            .iter_mut()
+            .filter(|f| f.is_file)
+            .for_each(|f| resolve(&mut f.value)),
+        _ => {}
+    }
+}
+
+/// Note shown instead of a body editor.
+pub fn unsupported_body_note(kind: &str) -> String {
+    if Body::KINDS.contains(&kind) {
+        format!(
+            "{kind} body: Roundtrip can't read this content. Saving leaves it as it is in the file."
+        )
+    } else {
+        format!("{kind} body: not supported yet. Saving leaves it as it is in the file.")
+    }
 }
 
 pub fn format_size(bytes: u64) -> String {

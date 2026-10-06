@@ -9,7 +9,8 @@ use std::sync::Arc;
 use domain::AppError;
 use domain::collection::{Collection, CollectionStore, Protocol};
 use domain::environment::{Environment, EnvironmentStore};
-use domain::http::{BodyKind, HttpSender, Method, Request};
+use domain::graphql::GraphqlBody;
+use domain::http::{Body, HttpSender, Method, Request};
 use domain::session::SessionStore;
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -26,6 +27,10 @@ pub struct Deps {
     /// `$uuid` & co, tried after environment variables
     pub dynamic_var: fn(&str) -> Option<String>,
     pub pretty_json: fn(&str) -> Option<String>,
+    /// sync file dialog, starting in the collection folder
+    pub pick_file: fn(&Path) -> Option<PathBuf>,
+    pub graphql_parse: fn(&str) -> Option<GraphqlBody>,
+    pub graphql_json: fn(&GraphqlBody) -> Result<String, AppError>,
 }
 
 pub(super) enum PendingAction {
@@ -58,6 +63,7 @@ pub struct WorkspaceController {
     pub(super) editing: RefCell<Option<PathBuf>>,
     pub(super) params: Rc<VecModel<KvRow>>,
     pub(super) headers: Rc<VecModel<KvRow>>,
+    pub(super) form_rows: Rc<VecModel<KvRow>>,
 }
 
 impl WorkspaceController {
@@ -75,13 +81,15 @@ impl WorkspaceController {
             editing: RefCell::default(),
             params: Rc::new(VecModel::default()),
             headers: Rc::new(VecModel::default()),
+            form_rows: Rc::new(VecModel::default()),
         });
         // globals outlive pages: reset everything Rust owns
         let s = ui.global::<WorkspaceState>();
         s.set_methods(strings(Method::ALL.iter().map(|m| m.as_str())));
-        s.set_body_kinds(strings(BodyKind::EDITABLE.iter().map(BodyKind::as_str)));
+        s.set_body_kinds(strings(Body::KINDS.iter().copied()));
         s.set_params(ModelRc::from(this.params.clone()));
         s.set_headers(ModelRc::from(this.headers.clone()));
+        s.set_form_rows(ModelRc::from(this.form_rows.clone()));
         s.set_has_collection(false);
         s.set_settings_open(false);
         s.set_settings_auth(AuthFields::default());
@@ -148,6 +156,7 @@ impl WorkspaceController {
         s.on_new_folder(on_index(|c, i| c.create(i, true)));
         s.on_rename_start(on_index(Self::rename_start));
         s.on_delete_row(on_index(Self::ask_delete));
+        s.on_pick_file(on_index(Self::pick_file));
         s.on_rename_cancel(on(Self::rename_cancel));
         s.on_confirm_delete(on(Self::confirm_delete));
         s.on_rename_commit({

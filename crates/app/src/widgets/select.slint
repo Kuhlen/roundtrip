@@ -1,0 +1,134 @@
+import { Theme } from "../theme.slint";
+
+export component Select inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index;
+    out property <string> current-value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : "";
+    in property <bool> enabled: true;
+    in property <bool> small;
+    in property <string> font-family: Theme.sans;
+    in property <length> font-size: 13px;
+    in property <int> font-weight: 400;
+    in property <color> value-color: Theme.text;
+    callback selected(string);
+    property <length> row-height: 26px;
+    property <bool> can-open: root.enabled && root.model.length > 0;
+    height: root.small ? 26px : 34px;
+    border-radius: 6px;
+    border-width: 1px;
+    background: Theme.raised;
+    border-color: fs.has-focus ? Theme.accent : Theme.line;
+    opacity: root.enabled ? 1 : 0.45;
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-enabled: root.enabled;
+    accessible-value: root.current-value;
+    accessible-expandable: true;
+    accessible-action-expand => {
+        if root.can-open {
+            popup.show();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: root.small ? 10px : 12px;
+        padding-right: 10px;
+        spacing: 10px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.current-value;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            color: root.value-color;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("../../assets/icons/chevron_down.svg");
+                width: 12px;
+                height: 12px;
+                colorize: Theme.faint;
+            }
+        }
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if !root.can-open {
+                return reject;
+            }
+            if e.text == " " || e.text == Key.Return {
+                popup.show();
+                return accept;
+            }
+            if e.text == Key.UpArrow || e.text == Key.DownArrow {
+                root.current-index = clamp(root.current-index + (e.text == Key.UpArrow ? -1 : 1), 0, root.model.length - 1);
+                root.selected(root.model[root.current-index]);
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        enabled: root.can-open;
+        clicked => {
+            fs.focus();
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 140px);
+        // click-on-release would close it after a drag-scroll with no pick
+        close-policy: close-on-click-outside;
+        height: min(root.model.length * root.row-height + 8px, 9 * root.row-height + 8px);
+        Rectangle {
+            background: Theme.surface;
+            border-color: Theme.line;
+            border-width: 1px;
+            border-radius: 6px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #00000080;
+            clip: true;
+            Flickable {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                content-height: root.model.length * root.row-height;
+                VerticalLayout {
+                    for item[i] in root.model: Rectangle {
+                        height: root.row-height;
+                        border-radius: 4px;
+                        background: row.has-hover ? Theme.accent-soft : transparent;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            Text {
+                                text: item;
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                color: i == root.current-index ? Theme.accent : Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        row := TouchArea {
+                            clicked => {
+                                root.current-index = i;
+                                root.selected(item);
+                                popup.close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

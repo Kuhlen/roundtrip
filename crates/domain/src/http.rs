@@ -66,49 +66,101 @@ impl KeyValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum BodyKind {
-    #[default]
-    None,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextKind {
     Json,
     Xml,
     Raw,
-    /// form-data, urlencoded, binary, graphql, ...: never sent, never rewritten
+}
+
+impl TextKind {
+    pub fn content_type(self) -> &'static str {
+        match self {
+            TextKind::Json => "application/json",
+            TextKind::Xml => "application/xml",
+            TextKind::Raw => "text/plain",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormField {
+    pub key: String,
+    /// file path when `is_file`
+    pub value: String,
+    pub enabled: bool,
+    pub is_file: bool,
+}
+
+impl FormField {
+    pub fn text(key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            enabled: true,
+            is_file: false,
+        }
+    }
+
+    pub fn file(key: impl Into<String>, path: impl Into<String>) -> Self {
+        Self {
+            is_file: true,
+            ..Self::text(key, path)
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.enabled && !self.key.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Body {
+    #[default]
+    None,
+    Text {
+        kind: TextKind,
+        text: String,
+    },
+    Urlencoded(Vec<KeyValue>),
+    FormData(Vec<FormField>),
+    /// file path; may hold {{var}}, relative = collection root
+    Binary(String),
+    /// upstream type or content we can't read: never sent, never rewritten
     Unsupported(String),
 }
 
-impl BodyKind {
-    /// body-select order in the editor
-    pub const EDITABLE: [BodyKind; 4] =
-        [BodyKind::None, BodyKind::Json, BodyKind::Xml, BodyKind::Raw];
+impl Body {
+    /// body-select order in the editor, ApiArk `body.type` spelling
+    pub const KINDS: [&'static str; 7] = [
+        "none",
+        "json",
+        "xml",
+        "raw",
+        "urlencoded",
+        "form-data",
+        "binary",
+    ];
 
-    pub fn parse(s: &str) -> BodyKind {
-        match s {
-            "none" => BodyKind::None,
-            "json" => BodyKind::Json,
-            "xml" => BodyKind::Xml,
-            "raw" => BodyKind::Raw,
-            other => BodyKind::Unsupported(other.to_owned()),
-        }
-    }
-
-    /// ApiArk `body.type` spelling
     pub fn as_str(&self) -> &str {
         match self {
-            BodyKind::None => "none",
-            BodyKind::Json => "json",
-            BodyKind::Xml => "xml",
-            BodyKind::Raw => "raw",
-            BodyKind::Unsupported(kind) => kind,
-        }
-    }
-
-    pub fn content_type(&self) -> Option<&'static str> {
-        match self {
-            BodyKind::None | BodyKind::Unsupported(_) => None,
-            BodyKind::Json => Some("application/json"),
-            BodyKind::Xml => Some("application/xml"),
-            BodyKind::Raw => Some("text/plain"),
+            Body::None => "none",
+            Body::Text {
+                kind: TextKind::Json,
+                ..
+            } => "json",
+            Body::Text {
+                kind: TextKind::Xml,
+                ..
+            } => "xml",
+            Body::Text {
+                kind: TextKind::Raw,
+                ..
+            } => "raw",
+            Body::Urlencoded(_) => "urlencoded",
+            Body::FormData(_) => "form-data",
+            Body::Binary(_) => "binary",
+            Body::Unsupported(kind) => kind,
         }
     }
 }
@@ -119,8 +171,7 @@ pub struct Request {
     pub url: String,
     pub params: Vec<KeyValue>,
     pub headers: Vec<KeyValue>,
-    pub body_kind: BodyKind,
-    pub body: String,
+    pub body: Body,
     /// None: inherit the collection's
     pub auth: Option<Auth>,
 }

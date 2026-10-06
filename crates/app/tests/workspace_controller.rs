@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use app::ui::{KvRow, KvTable, SendStatus};
 use domain::AppError;
-use domain::http::{BodyKind, KeyValue};
+use domain::http::{Body, KeyValue};
 use domain::session::Session;
 use slint::{CloseRequestResponse, ComponentHandle, Model};
 use support::{ROOT, build, fakes, kv, opened, p, setup, state, strings, tree_labels, tree_names};
@@ -175,6 +175,7 @@ fn save_writes_the_form_and_clears_dirty() {
             enabled: true,
             key: "X-Debug".into(),
             value: "1".into(),
+            file: false,
         },
     );
     s.invoke_kv_edited(KvTable::Headers, 0);
@@ -217,6 +218,7 @@ fn typing_into_placeholder_appends_row_and_remove_drops_it() {
             enabled: true,
             key: "limit".into(),
             value: "".into(),
+            file: false,
         },
     );
     s.invoke_kv_edited(KvTable::Params, 1);
@@ -244,6 +246,7 @@ fn disabled_param_is_not_counted_or_resolved() {
             enabled: false,
             key: "page".into(),
             value: "2".into(),
+            file: false,
         },
     );
     s.invoke_kv_edited(KvTable::Params, 0);
@@ -273,8 +276,8 @@ fn saving_unsupported_body_keeps_it() {
     s.invoke_changed();
     s.invoke_save();
     assert_eq!(
-        f.collections.saved.borrow()[0].1.body_kind,
-        BodyKind::Unsupported("form-data".into())
+        f.collections.saved.borrow()[0].1.body,
+        Body::Unsupported("form-data".into())
     );
 }
 

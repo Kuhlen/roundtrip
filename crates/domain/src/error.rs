@@ -22,6 +22,10 @@ pub enum AppError {
     AlreadyExists(String),
     #[error("invalid name: {0}")]
     InvalidName(String),
+    #[error("cannot read file: {0}")]
+    File(String),
+    #[error("invalid JSON: {0}")]
+    InvalidJson(String),
     #[error("storage error: {0}")]
     Storage(String),
 }
