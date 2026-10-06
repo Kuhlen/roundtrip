@@ -150,7 +150,8 @@ export component Sidebar inherits Rectangle {
                 }
                 add-menu := ContextMenuArea {
                     width: plus.preferred-width;
-                    height: plus.preferred-height;
+                    // Btn fixes its own height; preferred-height is smaller and lifts the "+"
+                    height: plus.height;
                     enabled: WorkspaceState.has-collection;
                     Menu {
                         MenuItem {
