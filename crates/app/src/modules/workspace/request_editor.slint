@@ -1,0 +1,278 @@
+import { ListView, TextEdit } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { WorkspaceState, KvRow, KvTable } from "workspace_state.slint";
+import { Btn, Checkbox, Field, Select, Tab } from "controls.slint";
+
+// solid border: Slint has no dashed borders
+component Note inherits Rectangle {
+    in property <string> text;
+    border-width: 1px;
+    border-color: Theme.line;
+    border-radius: 6px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        Text { text: root.text; color: Theme.muted; wrap: word-wrap; }
+    }
+}
+
+component KvTableView inherits Rectangle {
+    in property <[KvRow]> rows;
+    in property <KvTable> table;
+    // ListView's own preferred height is tiny; ask for every row, shrink only when space runs out
+    preferred-height: (root.rows.length + 1) * 32px + 2px;
+    max-height: self.preferred-height;
+    border-width: 1px;
+    border-color: Theme.line-soft;
+    border-radius: 6px;
+    clip: true;
+    VerticalLayout {
+        padding: 1px;
+        Rectangle {
+            height: 32px;
+            background: Theme.surface;
+            HorizontalLayout {
+                Rectangle { width: 30px; }
+                // same 10 px inset as the Field cells below
+                HorizontalLayout {
+                    horizontal-stretch: 10;
+                    padding-left: 10px;
+                    Text { text: "KEY"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                }
+                HorizontalLayout {
+                    horizontal-stretch: 13;
+                    padding-left: 10px;
+                    Text { text: "VALUE"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                }
+                Rectangle { width: 28px; }
+            }
+        }
+        ListView {
+            vertical-stretch: 1;
+            // std min (~50 px) left a gap under a lone placeholder row
+            min-height: 32px;
+            for row[i] in root.rows: line := Rectangle {
+                // controller keeps an empty row last; typing into it adds a row
+                property <bool> is-last: i == root.rows.length - 1;
+                height: 32px;
+                Rectangle {
+                    y: 0;
+                    height: 1px;
+                    background: Theme.line-soft;
+                }
+                HorizontalLayout {
+                    Rectangle {
+                        width: 30px;
+                        if !line.is-last: Checkbox {
+                            x: 8px;
+                            y: 9px;
+                            checked <=> row.enabled;
+                            toggled => { WorkspaceState.kv-edited(root.table, i); }
+                        }
+                    }
+                    Field {
+                        horizontal-stretch: 10;
+                        framed: false;
+                        text <=> row.key;
+                        placeholder: "Key";
+                        struck: !row.enabled;
+                        edited => { WorkspaceState.kv-edited(root.table, i); }
+                    }
+                    Field {
+                        horizontal-stretch: 13;
+                        framed: false;
+                        text <=> row.value;
+                        placeholder: "Value";
+                        struck: !row.enabled;
+                        edited => { WorkspaceState.kv-edited(root.table, i); }
+                    }
+                    Rectangle {
+                        width: 28px;
+                        if !line.is-last: Text {
+                            text: "×";
+                            color: del.has-hover ? Theme.err : Theme.faint;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        del := TouchArea {
+                            enabled: !line.is-last;
+                            clicked => { WorkspaceState.kv-removed(root.table, i); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spans the editor and response columns
+export component RequestHeader inherits Rectangle {
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 10px;
+            if WorkspaceState.crumb != "": Text { text: WorkspaceState.crumb; color: Theme.faint; }
+            Text {
+                text: WorkspaceState.has-request ? WorkspaceState.request-name : "No request selected";
+                font-weight: 600;
+                color: WorkspaceState.has-request ? Theme.text : Theme.faint;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: WorkspaceState.request-file; font-family: Theme.mono; font-size: 11px; color: Theme.faint; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            padding-top: 6px;
+            spacing: 8px;
+            Select {
+                width: 104px;
+                font-family: Theme.mono;
+                font-size: 12px;
+                font-weight: 600;
+                value-color: Theme.method-color(self.current-value);
+                model: WorkspaceState.methods;
+                current-index <=> WorkspaceState.method-index;
+                enabled: WorkspaceState.has-request;
+                selected => { WorkspaceState.changed(); }
+            }
+            Field {
+                horizontal-stretch: 1;
+                text <=> WorkspaceState.url;
+                placeholder: "https://";
+                enabled: WorkspaceState.has-request;
+                edited => { WorkspaceState.changed(); }
+            }
+            Btn {
+                text: "Send";
+                hint: "Ctrl ⏎";
+                primary: true;
+                enabled: WorkspaceState.can-send;
+                clicked => { WorkspaceState.send(); }
+            }
+        }
+        // what Send will call once {{…}} is filled in
+        if WorkspaceState.resolved-url != "": Text {
+            text: "→ " + WorkspaceState.resolved-url;
+            font-family: Theme.mono;
+            font-size: 11px;
+            color: Theme.muted;
+            overflow: elide;
+        }
+    }
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.line-soft;
+    }
+}
+
+export component RequestEditor inherits Rectangle {
+    if !WorkspaceState.has-request: VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 8px;
+        Text { text: "Pick a request from the sidebar"; color: Theme.muted; font-size: 14px; horizontal-alignment: center; }
+        Text {
+            text: "Roundtrip reads ApiArk collections as they are. Nothing is converted.";
+            color: Theme.faint;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+    if WorkspaceState.has-request && WorkspaceState.unsupported-protocol != "": VerticalLayout {
+        alignment: start;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 12px;
+        Note { text: WorkspaceState.unsupported-protocol + " requests are not supported yet. Open this one in ApiArk for now."; }
+    }
+    if WorkspaceState.has-request && WorkspaceState.unsupported-protocol == "": VerticalLayout {
+        Rectangle {
+            height: 38px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 18px;
+                Tab {
+                    text: "Params";
+                    count: WorkspaceState.param-count > 0 ? "\{WorkspaceState.param-count}" : "";
+                    active: WorkspaceState.editor-tab == 0;
+                    clicked => { WorkspaceState.editor-tab = 0; }
+                }
+                Tab {
+                    text: "Headers";
+                    count: WorkspaceState.header-count > 0 ? "\{WorkspaceState.header-count}" : "";
+                    active: WorkspaceState.editor-tab == 1;
+                    clicked => { WorkspaceState.editor-tab = 1; }
+                }
+                Tab {
+                    text: "Body";
+                    count: WorkspaceState.unsupported-body;
+                    active: WorkspaceState.editor-tab == 2;
+                    clicked => { WorkspaceState.editor-tab = 2; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": VerticalLayout {
+                    alignment: center;
+                    Select {
+                        width: 96px;
+                        small: true;
+                        font-family: Theme.mono;
+                        font-size: 12px;
+                        model: WorkspaceState.body-kinds;
+                        current-index <=> WorkspaceState.body-kind-index;
+                        selected => { WorkspaceState.changed(); }
+                    }
+                }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line-soft;
+            }
+        }
+        if WorkspaceState.editor-tab == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 14px;
+            padding-top: 12px;
+            KvTableView {
+                vertical-stretch: 1;
+                rows: WorkspaceState.params;
+                table: KvTable.params;
+            }
+        }
+        if WorkspaceState.editor-tab == 1: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 14px;
+            padding-top: 12px;
+            KvTableView {
+                vertical-stretch: 1;
+                rows: WorkspaceState.headers;
+                table: KvTable.headers;
+            }
+        }
+        if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body != "": VerticalLayout {
+            vertical-stretch: 1;
+            alignment: start;
+            padding: 14px;
+            padding-top: 12px;
+            Note { text: WorkspaceState.unsupported-body + " body: not supported yet. Saving leaves it as it is in the file."; }
+        }
+        if WorkspaceState.editor-tab == 2 && WorkspaceState.unsupported-body == "": TextEdit {
+            vertical-stretch: 1;
+            text <=> WorkspaceState.body;
+            font-family: Theme.mono;
+            font-size: 12px;
+            wrap: no-wrap;
+            edited(text) => { WorkspaceState.changed(); }
+        }
+    }
+}

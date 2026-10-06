@@ -1,0 +1,415 @@
+import { Theme } from "../../theme.slint";
+
+// std widgets take fluent colors (Palette read-only in 1.18.1); these use Theme
+
+export component Btn inherits Rectangle {
+    in property <string> text;
+    // kbd hint after the label, e.g. "Ctrl ⏎"
+    in property <string> hint;
+    in property <bool> primary;
+    in property <bool> ghost;
+    in property <bool> small;
+    in property <bool> enabled: true;
+    in property <color> text-color: Theme.text;
+    callback clicked();
+    property <color> fg: root.primary ? Theme.on-accent : root.text-color;
+    property <length> pad: root.primary ? 18px : root.small ? 10px : 12px;
+    height: root.small ? 26px : 34px;
+    horizontal-stretch: 0;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.primary ? Theme.accent : Theme.line;
+    background: root.primary ? Theme.accent : root.ghost ? transparent : Theme.raised;
+    opacity: root.enabled ? 1 : 0.45;
+    forward-focus: fs;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: root.pad;
+        padding-right: root.pad;
+        spacing: 6px;
+        alignment: center;
+        Text {
+            text: root.text;
+            color: root.fg;
+            font-size: root.small ? 12px : 13px;
+            font-weight: root.primary ? 600 : 500;
+            vertical-alignment: center;
+        }
+        if root.hint != "": Text {
+            text: root.hint;
+            color: root.fg;
+            opacity: 0.7;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            vertical-alignment: center;
+        }
+    }
+    Rectangle {
+        border-radius: root.border-radius;
+        background: !root.enabled ? transparent : touch.pressed ? #00000026 : touch.has-hover ? #ffffff10 : transparent;
+    }
+    // drawn on top so a caller border-color can't hide it
+    if fs.has-focus: Rectangle {
+        border-radius: root.border-radius;
+        border-width: 1px;
+        border-color: root.primary ? Theme.text : Theme.accent;
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if e.text == " " || e.text == Key.Return {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            fs.focus();
+            root.clicked();
+        }
+    }
+}
+
+export component Field inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder;
+    in property <bool> enabled <=> input.enabled;
+    // false = bare cell inside the key/value table
+    in property <bool> framed: true;
+    // disabled key/value row; Text has no strikethrough, so draw one
+    in property <bool> struck;
+    callback edited();
+    property <length> pad: root.framed ? 12px : 10px;
+    height: root.framed ? 34px : 32px;
+    border-radius: root.framed ? 6px : 0;
+    border-width: root.framed ? 1px : 0;
+    background: root.framed || input.has-focus ? Theme.raised : transparent;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
+    opacity: root.enabled ? 1 : 0.45;
+    clip: true;
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-enabled: root.enabled;
+    accessible-value: root.text;
+    accessible-placeholder-text: root.placeholder;
+
+    if root.text == "": Text {
+        x: root.pad;
+        width: parent.width - 2 * root.pad;
+        text: root.placeholder;
+        font-family: Theme.mono;
+        font-size: 12px;
+        color: Theme.faint;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    Rectangle {
+        x: root.pad;
+        width: parent.width - 2 * root.pad;
+        clip: true;
+        input := TextInput {
+            // same trick as std LineEditBase: shift so the cursor stays visible
+            property <length> computed-x;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.computed-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            height: 100%;
+            single-line: true;
+            vertical-alignment: center;
+            font-family: Theme.mono;
+            font-size: root.framed ? 12.5px : 12px;
+            color: root.struck ? Theme.faint : Theme.text;
+            selection-background-color: Theme.accent-soft;
+            selection-foreground-color: Theme.text;
+            accessible-role: none;
+            cursor-position-changed(pos) => {
+                if pos.x + self.computed-x < 0 {
+                    self.computed-x = -pos.x;
+                } else if pos.x + self.computed-x > parent.width - self.text-cursor-width {
+                    self.computed-x = parent.width - pos.x - self.text-cursor-width;
+                }
+            }
+            edited => {
+                root.edited();
+            }
+        }
+        if root.struck: Rectangle {
+            y: parent.height / 2;
+            x: input.x;
+            width: min(parent.width, input.preferred-width);
+            height: 1px;
+            background: Theme.faint;
+        }
+    }
+}
+
+export component Select inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index;
+    out property <string> current-value: root.current-index >= 0 && root.current-index < root.model.length ? root.model[root.current-index] : "";
+    in property <bool> enabled: true;
+    in property <bool> small;
+    in property <string> font-family: Theme.sans;
+    in property <length> font-size: 13px;
+    in property <int> font-weight: 400;
+    in property <color> value-color: Theme.text;
+    callback selected(string);
+    property <length> row-height: 26px;
+    property <bool> can-open: root.enabled && root.model.length > 0;
+    height: root.small ? 26px : 34px;
+    border-radius: 6px;
+    border-width: 1px;
+    background: Theme.raised;
+    border-color: fs.has-focus ? Theme.accent : Theme.line;
+    opacity: root.enabled ? 1 : 0.45;
+    forward-focus: fs;
+    accessible-role: combobox;
+    accessible-enabled: root.enabled;
+    accessible-value: root.current-value;
+    accessible-expandable: true;
+    accessible-action-expand => {
+        if root.can-open {
+            popup.show();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: root.small ? 10px : 12px;
+        padding-right: 10px;
+        spacing: 10px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.current-value;
+            font-family: root.font-family;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            color: root.value-color;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("../../../assets/icons/chevron_down.svg");
+                width: 12px;
+                height: 12px;
+                colorize: Theme.faint;
+            }
+        }
+    }
+    fs := FocusScope {
+        enabled: root.enabled;
+        key-pressed(e) => {
+            if !root.can-open {
+                return reject;
+            }
+            if e.text == " " || e.text == Key.Return {
+                popup.show();
+                return accept;
+            }
+            if e.text == Key.UpArrow || e.text == Key.DownArrow {
+                root.current-index = clamp(root.current-index + (e.text == Key.UpArrow ? -1 : 1), 0, root.model.length - 1);
+                root.selected(root.model[root.current-index]);
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        enabled: root.can-open;
+        clicked => {
+            fs.focus();
+            popup.show();
+        }
+    }
+
+    popup := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: max(root.width, 140px);
+        // click-on-release would close it after a drag-scroll with no pick
+        close-policy: close-on-click-outside;
+        height: min(root.model.length * root.row-height + 8px, 9 * root.row-height + 8px);
+        Rectangle {
+            background: Theme.surface;
+            border-color: Theme.line;
+            border-width: 1px;
+            border-radius: 6px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #00000080;
+            clip: true;
+            Flickable {
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                content-height: root.model.length * root.row-height;
+                VerticalLayout {
+                    for item[i] in root.model: Rectangle {
+                        height: root.row-height;
+                        border-radius: 4px;
+                        background: row.has-hover ? Theme.accent-soft : transparent;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            Text {
+                                text: item;
+                                font-family: root.font-family;
+                                font-size: root.font-size;
+                                color: i == root.current-index ? Theme.accent : Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        row := TouchArea {
+                            clicked => {
+                                root.current-index = i;
+                                root.selected(item);
+                                popup.close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component Checkbox inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled();
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.checked || fs.has-focus ? Theme.accent : Theme.line;
+    background: root.checked ? Theme.accent : transparent;
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.flip(); }
+    function flip() {
+        root.checked = !root.checked;
+        root.toggled();
+    }
+
+    if root.checked: Text {
+        text: "✓";
+        color: Theme.on-accent;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " {
+                root.flip();
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        clicked => {
+            fs.focus();
+            root.flip();
+        }
+    }
+}
+
+export component Toggle inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    horizontal-stretch: 0;
+    accessible-role: checkbox;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.checked = !root.checked; }
+
+    HorizontalLayout {
+        spacing: 10px;
+        Text { text: root.text; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 28px;
+                height: 16px;
+                border-radius: 8px;
+                background: root.checked ? Theme.accent : Theme.line;
+                border-width: fs.has-focus ? 1px : 0;
+                border-color: Theme.text;
+                Rectangle {
+                    x: root.checked ? parent.width - self.width - 2px : 2px;
+                    y: 2px;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 6px;
+                    background: root.checked ? Theme.on-accent : Theme.muted;
+                    animate x { duration: 120ms; }
+                }
+            }
+        }
+    }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == " " {
+                root.checked = !root.checked;
+                return accept;
+            }
+            reject
+        }
+    }
+    TouchArea {
+        clicked => {
+            fs.focus();
+            root.checked = !root.checked;
+        }
+    }
+}
+
+export component Tab inherits Rectangle {
+    in property <string> text;
+    // "" hides it (Params with no active rows)
+    in property <string> count;
+    in property <bool> active;
+    callback clicked();
+    horizontal-stretch: 0;
+    accessible-role: tab;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        Text { text: root.text; color: root.active ? Theme.text : Theme.muted; vertical-alignment: center; }
+        if root.count != "": Text {
+            text: root.count;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            color: Theme.faint;
+            vertical-alignment: center;
+        }
+    }
+    if root.active: Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: Theme.accent;
+    }
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+}

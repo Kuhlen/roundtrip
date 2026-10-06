@@ -1,0 +1,23 @@
+import "../assets/fonts/IBMPlexSans[wdth,wght].ttf";
+import "../assets/fonts/JetBrainsMono-Regular.ttf";
+import "../assets/fonts/JetBrainsMono-Bold.ttf";
+import { Theme } from "theme.slint";
+import { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, KvRow } from "modules/workspace/workspace_state.slint";
+import { WorkspaceView } from "modules/workspace/workspace_view.slint";
+
+export { WorkspaceState, SendStatus, StatusClass, KvTable, TreeRow, KvRow }
+
+export component AppWindow inherits Window {
+    title: "Roundtrip";
+    icon: @image-url("../assets/app_icon.png");
+    min-width: 960px;
+    min-height: 600px;
+    preferred-width: 1180px;
+    preferred-height: 700px;
+    background: Theme.bg;
+    default-font-family: Theme.sans;
+    default-font-size: 13px;
+
+    // Palette is read-only in 1.18.1: std widgets keep fluent-dark colors
+    WorkspaceView { }
+}

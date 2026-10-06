@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["kuhlen"]
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+data = { path = "crates/data" }
+domain = { path = "crates/domain" }
+slint = "=1.18.1"
+slint-build = "=1.18.1"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"

@@ -1,0 +1,81 @@
+export enum SendStatus { idle, sending, done, failed }
+export enum StatusClass { ok, warn, err }
+export enum KvTable { params, headers }
+export struct TreeRow { depth: int, name: string, label: string, folder: bool, expanded: bool, active: bool, dirty: bool }
+export struct KvRow { enabled: bool, key: string, value: string }
+
+// in = pushed from Rust; in-out = form state owned by Slint, read by Rust
+export global WorkspaceState {
+    // sidebar
+    in property <bool> has-collection;
+    in property <string> collection-name;
+    in property <string> collection-path;
+    // [0] = "No environment"
+    in property <[string]> environments;
+    in-out property <int> environment-index;
+    in property <[TreeRow]> tree;
+
+    // request
+    in property <bool> has-request;
+    // "users /", "" at the collection root
+    in property <string> crumb;
+    in property <string> request-name;
+    in property <string> request-file;
+    in property <[string]> methods;
+    in-out property <int> method-index;
+    in-out property <string> url;
+    in property <string> resolved-url;
+    // last row is always the empty placeholder
+    in property <[KvRow]> params;
+    in property <[KvRow]> headers;
+    in property <int> param-count;
+    in property <int> header-count;
+    in property <[string]> body-kinds;
+    in-out property <int> body-kind-index;
+    in-out property <string> body;
+    // body type name, "" = editable
+    in property <string> unsupported-body;
+    // protocol name, "" = sendable
+    in property <string> unsupported-protocol;
+    in property <bool> dirty;
+    in-out property <int> editor-tab;
+
+    // response
+    in property <SendStatus> send-status;
+    in property <string> status-text;
+    in property <StatusClass> status-class;
+    in property <string> elapsed;
+    in property <string> size;
+    in property <bool> truncated;
+    in property <string> response-raw;
+    // "" = body is not JSON
+    in property <string> response-pretty;
+    in property <[KvRow]> response-headers;
+    in-out property <bool> pretty: true;
+    in-out property <int> response-tab;
+    in property <string> fail-title;
+    in property <string> fail-hint;
+    in property <string> fail-detail;
+
+    // banner + confirm dialog
+    in property <string> banner-title;
+    in property <string> banner-hint;
+    in property <bool> confirm-open;
+    in property <string> confirm-name;
+    in property <string> confirm-file;
+
+    out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "";
+
+    callback open-collection();
+    callback environment-selected();
+    callback row-clicked(int);
+    callback changed();
+    callback kv-edited(KvTable, int);
+    callback kv-removed(KvTable, int);
+    callback send();
+    callback save();
+    callback dismiss-banner();
+    callback confirm-save();
+    callback confirm-discard();
+    callback confirm-cancel();
+}

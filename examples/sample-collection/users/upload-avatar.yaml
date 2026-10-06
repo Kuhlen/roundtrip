@@ -1,0 +1,6 @@
+name: Upload avatar
+method: POST
+url: '{{baseUrl}}/post'
+body:
+  type: form-data
+  content: avatar=@avatar.png

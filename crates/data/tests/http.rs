@@ -1,0 +1,192 @@
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread::{self, JoinHandle};
+
+use data::http::{ReqwestSender, pretty_json};
+use domain::AppError;
+use domain::http::{BodyKind, HttpSender, KeyValue, Method, Request};
+
+/// One-shot local server: answers `response`, returns the raw request, lowercased.
+fn serve(response: Vec<u8>) -> (String, JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let base = format!("http://{}", listener.local_addr().expect("addr"));
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut chunk).expect("read");
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&buf[..end]).to_lowercase();
+                let len = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .map_or(0, |v| v.trim().parse::<usize>().expect("length"));
+                if buf.len() >= end + 4 + len {
+                    break;
+                }
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        stream.write_all(&response).expect("write");
+        String::from_utf8_lossy(&buf).to_lowercase()
+    });
+    (base, handle)
+}
+
+fn reply(body: &[u8], extra_headers: &str) -> Vec<u8> {
+    let mut r = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n{extra_headers}\r\n",
+        body.len()
+    )
+    .into_bytes();
+    r.extend_from_slice(body);
+    r
+}
+
+fn get(url: String) -> Request {
+    Request {
+        method: Method::Get,
+        url,
+        ..Request::default()
+    }
+}
+
+#[test]
+fn status_headers_and_body() {
+    let (base, server) = serve(reply(b"hello", "X-Test: 1\r\n"));
+    let resp = ReqwestSender::new()
+        .unwrap()
+        .send(&get(format!("{base}/path")))
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!((resp.status, resp.status_text.as_str()), (200, "OK"));
+    assert_eq!(resp.body, "hello");
+    assert_eq!(resp.size_bytes, 5);
+    assert!(!resp.truncated);
+    assert!(
+        resp.headers
+            .iter()
+            .any(|h| h.key == "x-test" && h.value == "1")
+    );
+}
+
+#[test]
+fn active_params_are_appended_to_the_url() {
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = get(format!("{base}/search?q=a"));
+    req.params = vec![
+        KeyValue::new("page", "2"),
+        KeyValue {
+            key: "debug".into(),
+            value: "true".into(),
+            enabled: false,
+        },
+        KeyValue::new("", "blank key"),
+    ];
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .starts_with("get /search?q=a&page=2 http/1.1")
+    );
+}
+
+#[test]
+fn content_type_is_not_duplicated() {
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = get(base);
+    req.method = Method::Post;
+    req.headers = vec![KeyValue::new("Content-Type", "application/vnd.api+json")];
+    req.body_kind = BodyKind::Json;
+    req.body = "{}".into();
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    let raw = server.join().unwrap();
+    assert_eq!(raw.matches("content-type:").count(), 1);
+    assert!(raw.contains("content-type: application/vnd.api+json"));
+}
+
+#[test]
+fn body_kind_sets_content_type_when_user_did_not() {
+    let (base, server) = serve(reply(b"", ""));
+    let mut req = get(base);
+    req.method = Method::Post;
+    req.body_kind = BodyKind::Json;
+    req.body = "{}".into();
+    ReqwestSender::new().unwrap().send(&req).unwrap();
+    assert!(
+        server
+            .join()
+            .unwrap()
+            .contains("content-type: application/json")
+    );
+}
+
+#[test]
+fn closed_port_is_connection_refused() {
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let result = ReqwestSender::new()
+        .unwrap()
+        .send(&get(format!("http://127.0.0.1:{port}/")));
+    assert!(
+        matches!(result, Err(AppError::ConnectionRefused(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn url_without_scheme_is_invalid_url() {
+    let result = ReqwestSender::new()
+        .unwrap()
+        .send(&get("httpbin.org/get".into()));
+    assert!(matches!(result, Err(AppError::InvalidUrl(_))), "{result:?}");
+}
+
+#[test]
+fn unsupported_body_is_never_sent() {
+    let mut req = get("http://127.0.0.1:9/".into());
+    req.body_kind = BodyKind::Unsupported("form-data".into());
+    assert!(matches!(
+        ReqwestSender::new().unwrap().send(&req),
+        Err(AppError::Request(_))
+    ));
+}
+
+#[test]
+fn large_body_is_cut_on_a_char_boundary() {
+    // 3-byte chars: the 1 MiB cut lands mid-char
+    let body = "€".repeat(1024 * 1024 / 3 + 10);
+    let (base, server) = serve(reply(body.as_bytes(), ""));
+    let resp = ReqwestSender::new().unwrap().send(&get(base)).unwrap();
+    server.join().unwrap();
+    assert!(resp.truncated);
+    assert_eq!(resp.size_bytes, body.len() as u64);
+    assert_eq!(resp.body.len(), 1024 * 1024 - 1);
+    assert!(resp.body.chars().all(|c| c == '€'));
+}
+
+#[test]
+fn binary_body_is_described() {
+    let (base, server) = serve(reply(&[0xff, 0xfe, 0x00, 0x89], ""));
+    let resp = ReqwestSender::new().unwrap().send(&get(base)).unwrap();
+    server.join().unwrap();
+    assert_eq!(resp.body, "<binary data: 4 bytes>");
+}
+
+#[test]
+fn pretty_json_keeps_key_order() {
+    assert_eq!(
+        pretty_json(r#"{"b":1,"a":[1]}"#).unwrap(),
+        "{\n  \"b\": 1,\n  \"a\": [\n    1\n  ]\n}"
+    );
+    assert_eq!(pretty_json("<xml/>"), None);
+    assert_eq!(pretty_json(""), None);
+}

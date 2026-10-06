@@ -1,0 +1,29 @@
+export global Theme {
+    out property <color> bg: #11151b;
+    out property <color> side: #0c1015;
+    out property <color> surface: #161b22;
+    out property <color> raised: #1d232c;
+    out property <color> line: #2a313b;
+    out property <color> line-soft: #20262f;
+    out property <color> text: #e4e8ee;
+    out property <color> muted: #95a0ad;
+    out property <color> faint: #66717e;
+    out property <color> accent: #9db4ff;
+    out property <color> accent-soft: #1f2a4a;
+    out property <color> on-accent: #0b1430;
+    out property <color> ok: #6cc18f;
+    out property <color> warn: #e5b454;
+    out property <color> err: #f0806f;
+    out property <color> err-bg: #2c1716;
+    out property <color> err-line: #5a2f2b;
+    out property <color> banner-title: #ffc4ba;
+    out property <color> banner-hint: #e7c6c0;
+    // rgba(4,6,9,.62)
+    out property <color> scrim: #0406099e;
+    out property <string> sans: "IBM Plex Sans";
+    out property <string> mono: "JetBrains Mono";
+
+    public pure function method-color(label: string) -> color {
+        label == "GET" ? #6cc18f : label == "POST" ? #e5b454 : label == "PUT" ? #5fa8f0 : label == "PATCH" ? #c39af2 : label == "DELETE" ? #f0806f : #9aa7b4
+    }
+}

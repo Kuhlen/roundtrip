@@ -1,0 +1,8 @@
+name: List users
+method: GET
+url: '{{baseUrl}}/get'
+params:
+  page: '2'
+  limit: '{{pageSize}}'
+headers:
+  Accept: application/json

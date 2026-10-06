@@ -1,0 +1,68 @@
+import { Theme } from "../../theme.slint";
+import { WorkspaceState } from "workspace_state.slint";
+import { Btn } from "controls.slint";
+
+// Save is the default button
+export component ConfirmDialog inherits Rectangle {
+    background: Theme.scrim;
+    // scrim swallows clicks
+    TouchArea { }
+    // capture phase: sees Escape even while Save holds focus
+    FocusScope {
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                WorkspaceState.confirm-cancel();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        width: 420px;
+        height: col.preferred-height;
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.line;
+        border-radius: 10px;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-color: #00000080;
+        col := VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+            Text {
+                text: "Save changes to \"" + WorkspaceState.confirm-name + "\"?";
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+                wrap: word-wrap;
+            }
+            Text {
+                text: "Your edits to " + WorkspaceState.confirm-file + " are lost if you don't save them.";
+                color: Theme.muted;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                padding-top: 8px;
+                spacing: 8px;
+                Btn {
+                    text: "Cancel";
+                    ghost: true;
+                    clicked => { WorkspaceState.confirm-cancel(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Btn {
+                    text: "Discard";
+                    text-color: Theme.err;
+                    clicked => { WorkspaceState.confirm-discard(); }
+                }
+                save := Btn {
+                    text: "Save";
+                    primary: true;
+                    clicked => { WorkspaceState.confirm-save(); }
+                }
+            }
+        }
+    }
+    init => { save.focus(); }
+}

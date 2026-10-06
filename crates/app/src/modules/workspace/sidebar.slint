@@ -1,0 +1,122 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { WorkspaceState, TreeRow } from "workspace_state.slint";
+import { Btn, Select } from "controls.slint";
+
+component TreeLine inherits Rectangle {
+    in property <TreeRow> item;
+    callback clicked();
+    height: 28px;
+    background: root.item.active ? Theme.accent-soft : touch.has-hover ? #ffffff08 : transparent;
+    if root.item.active: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.accent;
+    }
+    HorizontalLayout {
+        // method labels right-aligned at 38 px + 20 px per level, chevron at 8 px
+        padding-left: root.item.folder ? 8px + root.item.depth * 20px : root.item.depth * 20px;
+        padding-right: 12px;
+        spacing: 8px;
+        if root.item.folder: Text {
+            width: 12px;
+            text: root.item.expanded ? "▾" : "▸";
+            color: Theme.faint;
+            font-size: 10px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if !root.item.folder: Text {
+            width: 38px;
+            text: root.item.label;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            font-weight: 600;
+            color: Theme.method-color(root.item.label);
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.item.name;
+            color: root.item.folder ? Theme.muted : Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.item.dirty: Text { text: "●"; color: Theme.accent; font-size: 10px; vertical-alignment: center; }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    background: Theme.side;
+    if !WorkspaceState.has-collection: VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 8px;
+        Text { text: "No collection open"; color: Theme.muted; font-size: 14px; horizontal-alignment: center; }
+        Text {
+            text: "Open a folder that contains .apiark/apiark.yaml";
+            color: Theme.faint;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: center;
+            padding-top: 8px;
+            Btn {
+                text: "Open collection…";
+                primary: true;
+                clicked => { WorkspaceState.open-collection(); }
+            }
+        }
+    }
+    if WorkspaceState.has-collection: VerticalLayout {
+        VerticalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            padding-top: 14px;
+            padding-bottom: 12px;
+            spacing: 10px;
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Text { text: WorkspaceState.collection-name; font-size: 14px; font-weight: 600; color: Theme.text; overflow: elide; }
+                    Text { text: WorkspaceState.collection-path; font-family: Theme.mono; font-size: 11px; color: Theme.faint; overflow: elide; }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Btn {
+                        text: "Open…";
+                        small: true;
+                        ghost: true;
+                        clicked => { WorkspaceState.open-collection(); }
+                    }
+                }
+            }
+            Text { text: "ENVIRONMENT"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; }
+            Select {
+                model: WorkspaceState.environments;
+                current-index <=> WorkspaceState.environment-index;
+                font-weight: 500;
+                selected => { WorkspaceState.environment-selected(); }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line-soft; }
+        VerticalLayout {
+            vertical-stretch: 1;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            ListView {
+                for row[i] in WorkspaceState.tree: TreeLine {
+                    item: row;
+                    clicked => { WorkspaceState.row-clicked(i); }
+                }
+            }
+        }
+    }
+}

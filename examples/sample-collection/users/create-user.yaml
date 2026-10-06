@@ -1,0 +1,12 @@
+name: Create user
+method: POST
+url: '{{baseUrl}}/post'
+headers:
+  X-Request-Id: '{{$uuid}}'
+body:
+  type: json
+  content: |-
+    {
+      "name": "Ayu",
+      "email": "{{$randomEmail}}"
+    }

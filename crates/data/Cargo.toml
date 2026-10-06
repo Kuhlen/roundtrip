@@ -1,0 +1,27 @@
+[package]
+name = "data"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dirs = "6"
+domain.workspace = true
+rand = "0.10"
+# 0.12 + ring: 0.13 default pulls aws-lc-rs (cmake/nasm build)
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "http2", "charset"] }
+serde = { version = "1", features = ["derive"] }
+# keep JSON key order in the Pretty view
+serde_json = { version = "1", features = ["preserve_order"] }
+# ApiArk parity: same YAML parser as upstream
+serde_yaml = "0.9"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

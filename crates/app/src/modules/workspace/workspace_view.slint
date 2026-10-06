@@ -1,0 +1,64 @@
+import { Theme } from "../../theme.slint";
+import { WorkspaceState } from "workspace_state.slint";
+import { ErrorBanner } from "error_banner.slint";
+import { Sidebar } from "sidebar.slint";
+import { RequestHeader, RequestEditor } from "request_editor.slint";
+import { ResponsePanel } from "response_panel.slint";
+import { ConfirmDialog } from "confirm_dialog.slint";
+
+export component WorkspaceView inherits Rectangle {
+    // Ctrl+S / Ctrl+Enter; off while the dialog is open
+    function shortcut(e: KeyEvent) -> EventResult {
+        if WorkspaceState.confirm-open || !e.modifiers.control {
+            return reject;
+        }
+        if e.text == "s" || e.text == "S" {
+            WorkspaceState.save();
+            return accept;
+        }
+        if e.text == Key.Return {
+            if WorkspaceState.can-send {
+                WorkspaceState.send();
+            }
+            return accept;
+        }
+        reject
+    }
+
+    // root scope: capture runs before the focused field sees the key
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(e) => { root.shortcut(e) }
+        key-pressed(e) => { root.shortcut(e) }
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            if WorkspaceState.banner-title != "": ErrorBanner { }
+            HorizontalLayout {
+                vertical-stretch: 1;
+                Sidebar { width: 248px; }
+                Rectangle { width: 1px; background: Theme.line-soft; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    RequestHeader { }
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        RequestEditor { horizontal-stretch: 1; }
+                        Rectangle { width: 1px; background: Theme.line-soft; }
+                        ResponsePanel { horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+    }
+    if WorkspaceState.confirm-open: ConfirmDialog { }
+    // dialog focus is lost when it closes; shortcuts need keys back
+    property <bool> dialog-open: WorkspaceState.confirm-open;
+    changed dialog-open => {
+        if !self.dialog-open {
+            keys.focus();
+        }
+    }
+    init => { keys.focus(); }
+}

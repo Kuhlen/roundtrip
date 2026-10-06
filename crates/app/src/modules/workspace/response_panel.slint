@@ -1,0 +1,156 @@
+import { ListView, TextEdit } from "std-widgets.slint";
+import { Theme } from "../../theme.slint";
+import { WorkspaceState, SendStatus, StatusClass } from "workspace_state.slint";
+import { Tab, Toggle } from "controls.slint";
+
+component Pill inherits Rectangle {
+    in property <string> text;
+    in property <StatusClass> tone;
+    property <color> fg: root.tone == StatusClass.ok ? Theme.ok : root.tone == StatusClass.warn ? Theme.warn : Theme.err;
+    border-radius: 4px;
+    background: root.fg.with-alpha(0.12);
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        Text { text: root.text; color: root.fg; font-family: Theme.mono; font-size: 12px; font-weight: 600; }
+    }
+}
+
+export component ResponsePanel inherits Rectangle {
+    if WorkspaceState.send-status == SendStatus.idle: VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        Text { text: "Send a request to see the response"; color: Theme.faint; horizontal-alignment: center; wrap: word-wrap; }
+    }
+    if WorkspaceState.send-status == SendStatus.sending: VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                width: 22px;
+                height: 22px;
+                source: @image-url("../../../assets/icons/spinner.svg");
+                transform-rotation: animation-tick() / 900ms * 360deg;
+                accessible-role: progress-indicator;
+                accessible-label: "Sending";
+            }
+        }
+    }
+    if WorkspaceState.send-status == SendStatus.done: VerticalLayout {
+        Rectangle {
+            height: 38px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 14px;
+                VerticalLayout {
+                    alignment: center;
+                    Pill { text: WorkspaceState.status-text; tone: WorkspaceState.status-class; }
+                }
+                Text { text: WorkspaceState.elapsed; font-family: Theme.mono; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                Text { text: "·"; color: Theme.line; vertical-alignment: center; }
+                Text { text: WorkspaceState.size; font-family: Theme.mono; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+                if WorkspaceState.truncated: Text { text: "truncated at 1 MB"; font-size: 12px; color: Theme.warn; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line-soft;
+            }
+        }
+        Rectangle {
+            height: 38px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 18px;
+                Tab {
+                    text: "Body";
+                    active: WorkspaceState.response-tab == 0;
+                    clicked => { WorkspaceState.response-tab = 0; }
+                }
+                Tab {
+                    text: "Headers";
+                    count: "\{WorkspaceState.response-headers.length}";
+                    active: WorkspaceState.response-tab == 1;
+                    clicked => { WorkspaceState.response-tab = 1; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if WorkspaceState.response-tab == 0: Toggle { text: "Pretty"; checked <=> WorkspaceState.pretty; }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line-soft;
+            }
+        }
+        // single color: TextEdit cannot color spans
+        if WorkspaceState.response-tab == 0: TextEdit {
+            vertical-stretch: 1;
+            read-only: true;
+            wrap: no-wrap;
+            font-family: Theme.mono;
+            font-size: 12px;
+            text: WorkspaceState.pretty && WorkspaceState.response-pretty != "" ? WorkspaceState.response-pretty : WorkspaceState.response-raw;
+        }
+        if WorkspaceState.response-tab == 1: ListView {
+            vertical-stretch: 1;
+            for h in WorkspaceState.response-headers: HorizontalLayout {
+                height: 26px;
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 12px;
+                Text { horizontal-stretch: 2; text: h.key; font-family: Theme.mono; font-size: 12px; color: Theme.muted; vertical-alignment: center; overflow: elide; }
+                Text { horizontal-stretch: 3; text: h.value; font-family: Theme.mono; font-size: 12px; color: Theme.text; vertical-alignment: center; overflow: elide; }
+            }
+        }
+    }
+    if WorkspaceState.send-status == SendStatus.failed: VerticalLayout {
+        alignment: start;
+        // same 38 px status row as the done state
+        Rectangle {
+            height: 38px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 14px;
+                alignment: start;
+                VerticalLayout {
+                    alignment: center;
+                    Pill { text: "Failed"; tone: StatusClass.err; }
+                }
+                Text { text: "after " + WorkspaceState.elapsed; font-family: Theme.mono; font-size: 12px; color: Theme.muted; vertical-alignment: center; }
+            }
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.line-soft;
+            }
+        }
+        VerticalLayout {
+            padding-left: 18px;
+            padding-right: 18px;
+            padding-top: 22px;
+            padding-bottom: 22px;
+            spacing: 8px;
+            Text { text: WorkspaceState.fail-title; color: Theme.err; font-size: 15px; font-weight: 600; wrap: word-wrap; }
+            if WorkspaceState.fail-hint != "": Text { text: WorkspaceState.fail-hint; color: Theme.text; wrap: word-wrap; }
+            Rectangle {
+                background: Theme.surface;
+                border-width: 1px;
+                border-color: Theme.line-soft;
+                border-radius: 6px;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    Text { text: WorkspaceState.fail-detail; font-family: Theme.mono; font-size: 11.5px; color: Theme.faint; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+}

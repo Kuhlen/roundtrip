@@ -1,0 +1,4 @@
+name: Echo socket
+method: GET
+url: wss://echo.websocket.org
+protocol: websocket
