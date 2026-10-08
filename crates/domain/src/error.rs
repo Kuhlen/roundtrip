@@ -28,4 +28,8 @@ pub enum AppError {
     InvalidJson(String),
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("request cancelled")]
+    Cancelled,
+    #[error("history error: {0}")]
+    History(String),
 }

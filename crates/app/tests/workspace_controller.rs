@@ -1,6 +1,8 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
 use app::ui::{KvRow, KvTable, SendStatus};
 use domain::AppError;
@@ -8,7 +10,8 @@ use domain::http::{Body, KeyValue};
 use domain::session::Session;
 use slint::{CloseRequestResponse, ComponentHandle, Model};
 use support::{
-    ROOT, build, fakes, kv, opened, p, row_of, setup, state, strings, tree_labels, tree_names,
+    Fakes, ROOT, build, fakes, kv, opened, p, row_of, setup, state, strings, tree_labels,
+    tree_names,
 };
 
 #[test]
@@ -406,4 +409,85 @@ fn escape_cancels_the_confirm_dialog() {
         .dispatch_event(slint::platform::WindowEvent::KeyReleased { text: escape });
     assert!(!s.get_confirm_open());
     assert!(f.collections.deleted.borrow().is_empty());
+}
+
+#[test]
+fn cancel_shows_cancelled_and_reenables_send() {
+    let (f, ui, _c) = opened();
+    let s = state(&ui);
+    f.sender.hold.store(true, Ordering::SeqCst);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
+    s.invoke_send();
+    assert_eq!(s.get_send_status(), SendStatus::Sending);
+    s.invoke_cancel();
+    assert_eq!(s.get_send_status(), SendStatus::Cancelled);
+    assert!(s.get_can_send());
+    let flags = wait_for_flags(&f, 1);
+    assert!(flags[0].is_cancelled());
+    f.sender.hold.store(false, Ordering::SeqCst);
+}
+
+#[test]
+fn escape_cancels_after_a_mouse_click_on_send() {
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    let (f, ui, _c) = opened();
+    ui.window().set_size(slint::LogicalSize::new(1180.0, 700.0));
+    let s = state(&ui);
+    f.sender.hold.store(true, Ordering::SeqCst);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
+    // Send sits at the right end of the url row, 14 px padding
+    let position = slint::LogicalPosition::new(1180.0 - 14.0 - 20.0, 90.0);
+    let button = PointerEventButton::Left;
+    ui.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    ui.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    assert_eq!(s.get_send_status(), SendStatus::Sending, "click hit Send");
+    let escape: slint::SharedString = Key::Escape.into();
+    ui.window().dispatch_event(WindowEvent::KeyPressed {
+        text: escape.clone(),
+    });
+    ui.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: escape });
+    assert_eq!(
+        s.get_send_status(),
+        SendStatus::Cancelled,
+        "focus survived the click"
+    );
+    wait_for_flags(&f, 1);
+    f.sender.hold.store(false, Ordering::SeqCst);
+}
+
+#[test]
+fn closing_a_sending_tab_cancels_it() {
+    let (f, ui, _c) = opened();
+    let s = state(&ui);
+    f.sender.hold.store(true, Ordering::SeqCst);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
+    s.invoke_send();
+    s.invoke_tab_close(0);
+    let flags = wait_for_flags(&f, 1);
+    assert!(flags[0].is_cancelled());
+    f.sender.hold.store(false, Ordering::SeqCst);
+}
+
+#[test]
+fn cancel_without_a_send_does_nothing() {
+    let (_f, ui, _c) = opened();
+    let s = state(&ui);
+    s.invoke_row_clicked(row_of(&ui, "List users"));
+    s.invoke_cancel();
+    assert_eq!(s.get_send_status(), SendStatus::Idle);
+}
+
+/// Worker threads start asynchronously; wait until `n` sends reached the fake.
+fn wait_for_flags(f: &Fakes, n: usize) -> Vec<domain::http::CancelFlag> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let flags = f.sender.flags.lock().expect("flags").clone();
+        if flags.len() >= n || Instant::now() > deadline {
+            return flags;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }

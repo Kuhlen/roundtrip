@@ -1,0 +1,101 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, HistoryRow, StatusClass } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+
+component HistoryLine inherits Rectangle {
+    in property <HistoryRow> item;
+    callback clicked();
+    height: 28px;
+    background: touch.has-hover ? #ffffff08 : transparent;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        Text {
+            width: 44px;
+            text: root.item.method;
+            font-family: Theme.mono;
+            font-size: 10.5px;
+            font-weight: 600;
+            color: Theme.method-color(root.item.method);
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.item.url;
+            font-family: Theme.mono;
+            font-size: 11.5px;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            text: root.item.status;
+            font-family: Theme.mono;
+            font-size: 11px;
+            color: root.item.failed ? Theme.faint
+                : root.item.status-class == StatusClass.ok ? Theme.ok
+                : root.item.status-class == StatusClass.warn ? Theme.warn
+                : Theme.err;
+            vertical-alignment: center;
+        }
+        Text {
+            width: 52px;
+            text: root.item.time;
+            font-size: 11px;
+            color: Theme.faint;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+export component HistoryPanel inherits VerticalLayout {
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 8px;
+        Field {
+            text <=> WorkspaceState.history-query;
+            placeholder: "Search history";
+            edited => { WorkspaceState.history-refresh(); }
+        }
+    }
+    if WorkspaceState.history-note != "": VerticalLayout {
+        vertical-stretch: 1;
+        alignment: center;
+        padding: 24px;
+        Text {
+            text: WorkspaceState.history-note;
+            color: Theme.faint;
+            font-size: 12px;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+    if WorkspaceState.history-note == "": ListView {
+        vertical-stretch: 1;
+        for row[i] in WorkspaceState.history: HistoryLine {
+            item: row;
+            clicked => { WorkspaceState.history-clicked(i); }
+        }
+    }
+    HorizontalLayout {
+        padding: 12px;
+        alignment: start;
+        Btn {
+            text: "Clear all";
+            small: true;
+            ghost: true;
+            text-color: Theme.err;
+            enabled: WorkspaceState.history.length > 0;
+            clicked => { WorkspaceState.history-clear(); }
+        }
+    }
+}

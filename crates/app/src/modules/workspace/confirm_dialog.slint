@@ -5,6 +5,7 @@ import { Btn } from "../../widgets/btn.slint";
 // Cancel is the default button
 export component ConfirmDialog inherits Rectangle {
     property <bool> is-delete: WorkspaceState.dialog-kind == DialogKind.delete;
+    property <bool> is-clear: WorkspaceState.dialog-kind == DialogKind.clear-history;
     background: Theme.scrim;
     // scrim swallows clicks
     TouchArea { }
@@ -33,7 +34,9 @@ export component ConfirmDialog inherits Rectangle {
                 padding: 20px;
                 spacing: 10px;
                 Text {
-                    text: root.is-delete
+                    text: root.is-clear
+                        ? "Clear all history?"
+                        : root.is-delete
                         ? "Delete \"" + WorkspaceState.confirm-name + "\"?"
                         : "Save \"" + WorkspaceState.confirm-name + "\" before closing?";
                     font-size: 15px;
@@ -42,7 +45,9 @@ export component ConfirmDialog inherits Rectangle {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: root.is-delete
+                    text: root.is-clear
+                        ? "All history is removed, not only the entries shown. This cannot be undone."
+                        : root.is-delete
                         ? "This deletes " + WorkspaceState.confirm-file + (WorkspaceState.confirm-folder ? " and everything in it" : "") + " permanently."
                         : "This request is in no collection yet. Its edits are lost if you discard them.";
                     color: Theme.muted;
@@ -57,17 +62,22 @@ export component ConfirmDialog inherits Rectangle {
                         clicked => { WorkspaceState.confirm-cancel(); }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.is-clear: Btn {
+                        text: "Clear all";
+                        text-color: Theme.err;
+                        clicked => { WorkspaceState.confirm-clear-history(); }
+                    }
                     if root.is-delete: Btn {
                         text: "Delete";
                         text-color: Theme.err;
                         clicked => { WorkspaceState.confirm-delete(); }
                     }
-                    if !root.is-delete: Btn {
+                    if !root.is-delete && !root.is-clear: Btn {
                         text: "Discard";
                         text-color: Theme.err;
                         clicked => { WorkspaceState.confirm-discard(); }
                     }
-                    if !root.is-delete: Btn {
+                    if !root.is-delete && !root.is-clear: Btn {
                         text: "Save as…";
                         primary: true;
                         clicked => { WorkspaceState.confirm-save-as(); }

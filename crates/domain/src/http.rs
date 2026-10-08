@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::AppError;
@@ -188,7 +190,25 @@ pub struct Response {
     pub truncated: bool,
 }
 
+/// UI sets it, the worker polls it; never reset, one flag per Send.
+#[derive(Debug, Clone, Default)]
+pub struct CancelFlag(Arc<AtomicBool>);
+
+impl CancelFlag {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
 pub trait HttpSender: Send + Sync {
-    /// Blocking: call from a worker thread.
-    fn send(&self, request: &Request) -> Result<Response, AppError>;
+    /// Blocking: call from a worker thread. Returns `Cancelled` soon after `cancel` is set.
+    fn send(&self, request: &Request, cancel: &CancelFlag) -> Result<Response, AppError>;
 }

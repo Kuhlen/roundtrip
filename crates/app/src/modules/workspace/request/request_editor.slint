@@ -1,5 +1,5 @@
 import { Theme } from "../../../theme.slint";
-import { WorkspaceState, KvTable } from "../workspace_state.slint";
+import { WorkspaceState, KvTable, SendStatus } from "../workspace_state.slint";
 import { Btn } from "../../../widgets/btn.slint";
 import { Field } from "../../../widgets/field.slint";
 import { Note } from "../../../widgets/note.slint";
@@ -49,12 +49,20 @@ export component RequestHeader inherits Rectangle {
                 enabled: WorkspaceState.has-request;
                 edited => { WorkspaceState.changed(); }
             }
+            // one Btn: destroying the clicked (focused) one would drop focus and kill shortcuts
             Btn {
-                text: "Send";
-                hint: "Ctrl ⏎";
-                primary: true;
-                enabled: WorkspaceState.can-send;
-                clicked => { WorkspaceState.send(); }
+                property <bool> sending: WorkspaceState.send-status == SendStatus.sending;
+                text: self.sending ? "Cancel" : "Send";
+                hint: self.sending ? "Esc" : "Ctrl ⏎";
+                primary: !self.sending;
+                enabled: self.sending || WorkspaceState.can-send;
+                clicked => {
+                    if self.sending {
+                        WorkspaceState.cancel();
+                    } else {
+                        WorkspaceState.send();
+                    }
+                }
             }
         }
         // what Send will call once {{…}} is filled in

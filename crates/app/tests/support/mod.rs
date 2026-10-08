@@ -5,8 +5,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use app::modules::workspace::workspace_controller::{Deps, WorkspaceController};
 use app::ui::{AppWindow, KvRow, WorkspaceState};
@@ -14,9 +15,10 @@ use domain::AppError;
 use domain::auth::Auth;
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::environment::{Environment, EnvironmentStore, Scope};
-use domain::http::{Body, HttpSender, KeyValue, Method, Request, Response, TextKind};
+use domain::history::{HistoryEntry, HistoryStore};
+use domain::http::{Body, CancelFlag, HttpSender, KeyValue, Method, Request, Response, TextKind};
 use domain::session::{Session, SessionStore};
-use slint::{ComponentHandle, Model, ModelRc, SharedString};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode};
 
 thread_local! {
     /// what the fake file picker returns; None = cancelled
@@ -379,10 +381,18 @@ impl EnvironmentStore for FakeEnvironments {
 pub struct FakeSender {
     pub reply: Mutex<Result<Response, AppError>>,
     pub requests: Mutex<Vec<Request>>,
+    /// true: the worker waits here, flag ignored, to play a reply arriving late
+    pub hold: AtomicBool,
+    /// flag of every send, in order
+    pub flags: Mutex<Vec<CancelFlag>>,
 }
 
 impl HttpSender for FakeSender {
-    fn send(&self, request: &Request) -> Result<Response, AppError> {
+    fn send(&self, request: &Request, cancel: &CancelFlag) -> Result<Response, AppError> {
+        self.flags.lock().expect("flags").push(cancel.clone());
+        while self.hold.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
         self.requests
             .lock()
             .expect("requests")
@@ -407,11 +417,106 @@ impl SessionStore for FakeSession {
     }
 }
 
+#[derive(Default)]
+pub struct FakeHistory {
+    pub entries: Mutex<Vec<(HistoryEntry, Request)>>,
+    /// returned by every call but record
+    pub fail: Mutex<Option<AppError>>,
+}
+
+impl FakeHistory {
+    fn check(&self) -> Result<(), AppError> {
+        match self.fail.lock().expect("fail").clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+impl HistoryStore for FakeHistory {
+    fn record(&self, entry: &HistoryEntry, request: &Request) -> Result<(), AppError> {
+        let mut entries = self.entries.lock().expect("entries");
+        let id = entries.len() as i64 + 1;
+        entries.push((
+            HistoryEntry {
+                id,
+                ..entry.clone()
+            },
+            request.clone(),
+        ));
+        Ok(())
+    }
+
+    fn recent(&self, limit: usize) -> Result<Vec<HistoryEntry>, AppError> {
+        self.check()?;
+        let entries = self.entries.lock().expect("entries");
+        Ok(entries
+            .iter()
+            .rev()
+            .take(limit)
+            .map(|(e, _)| e.clone())
+            .collect())
+    }
+
+    fn search(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>, AppError> {
+        self.check()?;
+        let q = query.to_lowercase();
+        let hit = |e: &HistoryEntry| {
+            e.url.to_lowercase().contains(&q)
+                || e.method.as_str().to_lowercase().contains(&q)
+                || e.name
+                    .as_deref()
+                    .is_some_and(|n| n.to_lowercase().contains(&q))
+        };
+        let entries = self.entries.lock().expect("entries");
+        Ok(entries
+            .iter()
+            .rev()
+            .filter(|(e, _)| hit(e))
+            .take(limit)
+            .map(|(e, _)| e.clone())
+            .collect())
+    }
+
+    fn request(&self, id: i64) -> Result<Request, AppError> {
+        self.check()?;
+        self.entries
+            .lock()
+            .expect("entries")
+            .iter()
+            .find(|(e, _)| e.id == id)
+            .map(|(_, r)| r.clone())
+            .ok_or_else(|| AppError::History(format!("no entry {id}")))
+    }
+
+    fn clear(&self) -> Result<(), AppError> {
+        self.check()?;
+        self.entries.lock().expect("entries").clear();
+        Ok(())
+    }
+}
+
+pub fn history_entry(method: Method, url: &str, status: Option<u16>) -> HistoryEntry {
+    HistoryEntry {
+        id: 0,
+        method,
+        url: url.into(),
+        status,
+        status_text: status.map(|_| "OK".into()),
+        time_ms: status.map(|_| 84),
+        size_bytes: status.map(|_| 21),
+        at: SystemTime::now(),
+        collection: None,
+        name: None,
+    }
+}
+
 pub struct Fakes {
     pub collections: Rc<FakeCollections>,
     pub environments: Rc<FakeEnvironments>,
     pub sender: Arc<FakeSender>,
     pub session: Rc<FakeSession>,
+    pub history: Arc<FakeHistory>,
 }
 
 pub fn ok_response() -> Response {
@@ -488,19 +593,30 @@ pub fn fakes() -> Fakes {
         sender: Arc::new(FakeSender {
             reply: Mutex::new(Ok(ok_response())),
             requests: Mutex::default(),
+            hold: AtomicBool::new(false),
+            flags: Mutex::default(),
         }),
         session: Rc::new(FakeSession::default()),
+        history: Arc::new(FakeHistory::default()),
     }
 }
 
 /// Backend must be initialized by the caller.
 pub fn build(f: &Fakes) -> (AppWindow, Rc<WorkspaceController>) {
+    build_with(f, Ok(f.history.clone() as Arc<dyn HistoryStore>))
+}
+
+pub fn build_with(
+    f: &Fakes,
+    history: Result<Arc<dyn HistoryStore>, AppError>,
+) -> (AppWindow, Rc<WorkspaceController>) {
     let ui = AppWindow::new().expect("window");
     let deps = Deps {
         collections: f.collections.clone(),
         environments: f.environments.clone(),
         sender: f.sender.clone(),
         session: f.session.clone(),
+        history,
         dynamic_var: |_| None,
         pretty_json: data::http::pretty_json,
         pick_file: |_| PICKED.with(|p| p.borrow().clone()),
@@ -618,4 +734,19 @@ pub fn opened_with_body(body: Body) -> (Fakes, AppWindow, Rc<WorkspaceController
     open_with_env(&ui, &c);
     state(&ui).invoke_row_clicked(row_of(&ui, "Health check"));
     (f, ui, c)
+}
+
+/// Run the event loop until `done` holds, 5 s cap. Workers are async: poll what you assert.
+pub fn run_until(done: impl Fn() -> bool + 'static) {
+    let poll = Timer::default();
+    poll.start(TimerMode::Repeated, Duration::from_millis(5), move || {
+        if done() {
+            slint::quit_event_loop().expect("quit");
+        }
+    });
+    let cap = Timer::default();
+    cap.start(TimerMode::SingleShot, Duration::from_secs(5), || {
+        slint::quit_event_loop().expect("quit")
+    });
+    slint::run_event_loop().expect("event loop");
 }

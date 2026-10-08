@@ -1,21 +1,33 @@
-use std::fs::File;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::http::{Body, HttpSender, KeyValue, Request, Response};
-use reqwest::Url;
-use reqwest::blocking::multipart::Form;
-use reqwest::blocking::{Client, RequestBuilder};
+use domain::http::{Body, CancelFlag, HttpSender, KeyValue, Request, Response};
+use reqwest::header::CONTENT_LENGTH;
+use reqwest::multipart::Form;
+use reqwest::{Client, RequestBuilder, Url};
+use tokio::runtime::Runtime;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY: u64 = 10 * 1024 * 1024;
 const DISPLAY_LIMIT: usize = 1024 * 1024;
+const CANCEL_POLL: Duration = Duration::from_millis(50);
 
 // one shared client, no per-request proxy/TLS/cookie jar; upstream builds one per request
 pub struct ReqwestSender {
     client: Client,
+    // async only so cancel can drop the request; callers still block. Option: Drop takes it
+    runtime: Option<Runtime>,
+}
+
+// plain drop waits on blocking DNS tasks; quit must not hang
+impl Drop for ReqwestSender {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl ReqwestSender {
@@ -25,12 +37,18 @@ impl ReqwestSender {
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
             .map_err(|e| AppError::Request(e.to_string()))?;
-        Ok(Self { client })
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .map_err(|e| AppError::Request(e.to_string()))?;
+        Ok(Self {
+            client,
+            runtime: Some(runtime),
+        })
     }
-}
 
-impl HttpSender for ReqwestSender {
-    fn send(&self, request: &Request) -> Result<Response, AppError> {
+    async fn send_async(&self, request: &Request) -> Result<Response, AppError> {
         // A request that differs from the file is never sent
         if let Body::Unsupported(kind) = &request.body {
             return Err(AppError::Request(format!("{kind} body is not supported")));
@@ -83,10 +101,10 @@ impl HttpSender for ReqwestSender {
             }
             _ => {}
         }
-        builder = apply_body(builder, &request.body, user_set("content-type"))?;
+        builder = apply_body(builder, &request.body, user_set("content-type")).await?;
 
         let start = Instant::now();
-        let response = builder.send().map_err(classify)?;
+        let response = builder.send().await.map_err(classify)?;
         let status = response.status();
         let headers = response
             .headers()
@@ -96,7 +114,7 @@ impl HttpSender for ReqwestSender {
         if response.content_length().is_some_and(|len| len > MAX_BODY) {
             return Err(AppError::ResponseTooLarge(MAX_BODY));
         }
-        let bytes = response.bytes().map_err(classify)?;
+        let bytes = response.bytes().await.map_err(classify)?;
         let elapsed = start.elapsed();
         if bytes.len() as u64 > MAX_BODY {
             return Err(AppError::ResponseTooLarge(MAX_BODY));
@@ -114,6 +132,26 @@ impl HttpSender for ReqwestSender {
     }
 }
 
+impl HttpSender for ReqwestSender {
+    fn send(&self, request: &Request, cancel: &CancelFlag) -> Result<Response, AppError> {
+        // losing branch is dropped: the connection closes at once
+        let runtime = self.runtime.as_ref().expect("runtime lives until drop");
+        runtime.block_on(async {
+            tokio::select! {
+                result = self.send_async(request) => result,
+                () = cancelled(cancel) => Err(AppError::Cancelled),
+            }
+        })
+    }
+}
+
+// ponytail: 50 ms poll; a tokio Notify inside CancelFlag if cancel latency ever matters
+async fn cancelled(cancel: &CancelFlag) {
+    while !cancel.is_cancelled() {
+        tokio::time::sleep(CANCEL_POLL).await;
+    }
+}
+
 fn build_url(base: &str, params: &[KeyValue]) -> Result<Url, AppError> {
     let mut url = Url::parse(base).map_err(|e| AppError::InvalidUrl(format!("{e}: {base}")))?;
     let active: Vec<_> = params.iter().filter(|p| p.is_active()).collect();
@@ -126,7 +164,7 @@ fn build_url(base: &str, params: &[KeyValue]) -> Result<Url, AppError> {
     Ok(url)
 }
 
-fn apply_body(
+async fn apply_body(
     builder: RequestBuilder,
     body: &Body,
     user_type: bool,
@@ -158,6 +196,7 @@ fn apply_body(
             for f in fields.iter().filter(|f| f.is_active()) {
                 form = if f.is_file {
                     form.file(f.key.clone(), file_path(&f.value)?)
+                        .await
                         .map_err(|_| AppError::File(f.value.clone()))?
                 } else {
                     form.text(f.key.clone(), f.value.clone())
@@ -166,8 +205,18 @@ fn apply_body(
             builder.multipart(form)
         }
         Body::Binary(path) => {
-            let file = File::open(file_path(path)?).map_err(|_| AppError::File(path.clone()))?;
-            typed(builder, "application/octet-stream").body(file)
+            let file = tokio::fs::File::open(file_path(path)?)
+                .await
+                .map_err(|_| AppError::File(path.clone()))?;
+            let len = file
+                .metadata()
+                .await
+                .map_err(|_| AppError::File(path.clone()))?
+                .len();
+            // a streamed File goes chunked; some servers reject chunked uploads
+            typed(builder, "application/octet-stream")
+                .header(CONTENT_LENGTH, len)
+                .body(file)
         }
     })
 }

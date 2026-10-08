@@ -1,5 +1,5 @@
 import { Theme } from "../../theme.slint";
-import { WorkspaceState } from "workspace_state.slint";
+import { WorkspaceState, SendStatus } from "workspace_state.slint";
 import { ErrorBanner } from "../../snippets/error_banner.slint";
 import { Sidebar } from "sidebar/sidebar.slint";
 import { RequestHeader, RequestEditor } from "request/request_editor.slint";
@@ -61,6 +61,11 @@ export component WorkspaceView inherits Rectangle {
         capture-key-pressed(e) => { root.shortcut(e) }
         key-pressed(e) => {
             if root.shortcut(e) == EventResult.accept {
+                return accept;
+            }
+            // bubble phase: a renaming tree row eats Esc first
+            if !root.dialog-open && e.text == Key.Escape && WorkspaceState.send-status == SendStatus.sending {
+                WorkspaceState.cancel();
                 return accept;
             }
             root.tree-key(e)

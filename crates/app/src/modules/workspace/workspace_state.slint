@@ -1,11 +1,13 @@
 import { KvRow } from "../../snippets/kv_table.slint";
 import { AuthFields } from "../../snippets/auth_form.slint";
 
-export enum SendStatus { idle, sending, done, failed }
+export enum SendStatus { idle, sending, done, failed, cancelled }
 export enum StatusClass { ok, warn, err }
 export enum KvTable { params, headers, form }
-export enum DialogKind { untitled, delete }
+export enum DialogKind { untitled, delete, clear-history }
 export struct TabItem { title: string, dirty: bool, pinned: bool, active: bool, untitled: bool }
+// failed: the send ended in an error, status is "—"
+export struct HistoryRow { method: string, url: string, status: string, status-class: StatusClass, failed: bool, time: string }
 export struct TreeRow { depth: int, name: string, label: string, folder: bool, collection: bool, expanded: bool, active: bool, dirty: bool, editing: bool }
 
 // in = pushed from Rust; in-out = form state owned by Slint, read by Rust
@@ -18,6 +20,13 @@ export global WorkspaceState {
     in property <[TreeRow]> tree;
     // tree index of the active request, -1 = none (F2 / Del target)
     in property <int> active-row: -1;
+
+    // history: sidebar shows it instead of the tree
+    in-out property <bool> show-history;
+    in-out property <string> history-query;
+    in property <[HistoryRow]> history;
+    // "" = rows to show; else the empty or error text
+    in property <string> history-note;
 
     // tabs
     in property <[TabItem]> tabs;
@@ -117,6 +126,8 @@ export global WorkspaceState {
     callback kv-edited(KvTable, int);
     callback kv-removed(KvTable, int);
     callback send();
+    // Cancel button / Esc while the shown tab is sending
+    callback cancel();
     callback save();
     callback dismiss-banner();
     callback confirm-cancel();
@@ -152,4 +163,9 @@ export global WorkspaceState {
     callback tab-moved(int, int);
     // worker queued a send result
     callback response-ready();
+    // search edited or History shown: reload the list
+    callback history-refresh();
+    callback history-clicked(int);
+    callback history-clear();
+    callback confirm-clear-history();
 }

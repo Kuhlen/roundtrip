@@ -18,6 +18,8 @@ it does not understand yet. You can switch back to ApiArk at any time.
   ("Collection settings…" in a collection row's right-click menu, which also has "Close collection").
   A header you write yourself (`Authorization`, or the API key's name) wins over auth.
 - Send with Ctrl+Enter; status, time, size, pretty JSON, headers.
+- Cancel a request in flight with the Cancel button or Esc; the connection closes at once.
+- History of sent requests in the sidebar: search by URL, method or name, reopen any entry in a scratch tab, clear all. Auth secrets and secret headers are stored as `[REDACTED]`.
 - Open several collections at once; environments come from the first one (as in ApiArk).
 - Tabs: open, pin, drag to reorder, close (×, middle click, Ctrl+W), Close others / all; open tabs come back on the next start.
 - Ctrl+T opens a scratch request you can send without a collection; Ctrl+S saves it into a collection.
@@ -38,6 +40,8 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - Folder auth in _folder.yaml is ignored when sending (ApiArk does the same).
 - Disabled urlencoded rows are not stored (same as params and headers).
 - ApiArk sends a binary body's path as text, not the file.
+- The history list shows the newest 50 entries; search to reach older ones. Responses are not kept.
+- A reopened history entry carries the auth its collection had at send time (secrets redacted), not Inherit.
 
 ## Build
 

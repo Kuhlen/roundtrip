@@ -80,40 +80,12 @@ impl CollectionStore for CollectionDir {
     fn read_request(&self, file: &Path) -> Result<Request, AppError> {
         let raw: RequestFile =
             serde_yaml::from_str(&read_checked(file)?).map_err(|e| invalid(file, e))?;
-        Ok(Request {
-            method: parse_method(&raw.method, file)?,
-            url: raw.url,
-            params: pairs(raw.params),
-            headers: pairs(raw.headers),
-            body: raw
-                .body
-                .map_or(Body::None, |b| body_file::parse(&b.kind, &b.content)),
-            auth: parse_auth(raw.auth.as_ref()),
-        })
+        to_request(raw, file)
     }
 
     fn save_request(&self, file: &Path, request: &Request) -> Result<(), AppError> {
         let mut doc = read_doc(file)?;
-        doc.insert("method".into(), request.method.as_str().into());
-        doc.insert("url".into(), request.url.as_str().into());
-        set_pairs(&mut doc, "params", &request.params);
-        set_pairs(&mut doc, "headers", &request.headers);
-        match &request.body {
-            Body::Unsupported(_) => {}
-            Body::None => {
-                doc.shift_remove("body");
-            }
-            body => {
-                let mut map = Mapping::new();
-                map.insert("type".into(), body.as_str().into());
-                map.insert(
-                    "content".into(),
-                    body_file::content(body).unwrap_or_default().into(),
-                );
-                doc.insert("body".into(), Value::Mapping(map));
-            }
-        }
-        set_auth(&mut doc, request.auth.as_ref());
+        fill_doc(&mut doc, request);
         write_atomic(file, &doc)
     }
 
@@ -208,6 +180,56 @@ impl CollectionStore for CollectionDir {
         }
         .map_err(|e| storage(path, e))
     }
+}
+
+/// Request-file YAML without `name`; history stores requests in this shape.
+pub fn request_to_yaml(request: &Request) -> Result<String, AppError> {
+    let mut doc = Mapping::new();
+    fill_doc(&mut doc, request);
+    serde_yaml::to_string(&doc).map_err(|e| AppError::Storage(e.to_string()))
+}
+
+pub fn request_from_yaml(text: &str) -> Result<Request, AppError> {
+    let raw: RequestFile =
+        serde_yaml::from_str(text).map_err(|e| AppError::Storage(e.to_string()))?;
+    to_request(raw, Path::new("history"))
+}
+
+fn to_request(raw: RequestFile, file: &Path) -> Result<Request, AppError> {
+    Ok(Request {
+        method: parse_method(&raw.method, file)?,
+        url: raw.url,
+        params: pairs(raw.params),
+        headers: pairs(raw.headers),
+        body: raw
+            .body
+            .map_or(Body::None, |b| body_file::parse(&b.kind, &b.content)),
+        auth: parse_auth(raw.auth.as_ref()),
+    })
+}
+
+/// Keys `save_request` owns; others in `doc` stay as they are.
+fn fill_doc(doc: &mut Mapping, request: &Request) {
+    doc.insert("method".into(), request.method.as_str().into());
+    doc.insert("url".into(), request.url.as_str().into());
+    set_pairs(doc, "params", &request.params);
+    set_pairs(doc, "headers", &request.headers);
+    match &request.body {
+        Body::Unsupported(_) => {}
+        Body::None => {
+            doc.shift_remove("body");
+        }
+        body => {
+            let mut map = Mapping::new();
+            map.insert("type".into(), body.as_str().into());
+            map.insert(
+                "content".into(),
+                body_file::content(body).unwrap_or_default().into(),
+            );
+            doc.insert("body".into(), Value::Mapping(map));
+        }
+    }
+    set_auth(doc, request.auth.as_ref());
 }
 
 /// Folders first, then requests; each by `_folder.yaml` order, then name.

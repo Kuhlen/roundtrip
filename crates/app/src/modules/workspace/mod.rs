@@ -1,4 +1,5 @@
 mod auth_fields;
+pub mod history;
 mod request;
 mod send_flow;
 mod sidebar;

@@ -12,8 +12,12 @@ dirs = "6"
 domain.workspace = true
 form_urlencoded = "1"
 rand = "0.10"
-# 0.12 + ring: 0.13 default pulls aws-lc-rs (cmake/nasm build)
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "http2", "charset", "multipart"] }
+# 0.12 + ring: 0.13 default pulls aws-lc-rs (cmake/nasm build). stream: file bodies from tokio File
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset", "multipart", "stream"] }
+# async only inside http.rs, so Cancel can drop a request mid-flight
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "fs"] }
+# bundled: no system libsqlite needed on Windows
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 # keep JSON key order in the Pretty view
 serde_json = { version = "1", features = ["preserve_order"] }

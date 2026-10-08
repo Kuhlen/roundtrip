@@ -1,4 +1,4 @@
-//! Roundtrip infra: ApiArk collection folders, environments, reqwest sender, app state.
+//! Roundtrip infra: ApiArk collection folders, environments, reqwest sender, history, app state.
 
 use std::path::Path;
 
@@ -11,6 +11,7 @@ pub mod collection_dir;
 pub mod dynamic_vars;
 pub mod environment_dir;
 pub mod graphql;
+pub mod history_db;
 pub mod http;
 
 /// YAML scalar as text: numbers/bools keep their spelling, null is empty.

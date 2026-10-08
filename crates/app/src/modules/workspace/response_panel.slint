@@ -39,6 +39,11 @@ export component ResponsePanel inherits Rectangle {
             }
         }
     }
+    if WorkspaceState.send-status == SendStatus.cancelled: VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        Text { text: "Request cancelled"; color: Theme.muted; horizontal-alignment: center; }
+    }
     if WorkspaceState.send-status == SendStatus.done: VerticalLayout {
         Rectangle {
             height: 38px;

@@ -1,11 +1,12 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use data::http::{ReqwestSender, pretty_json};
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
-use domain::http::{Body, FormField, HttpSender, KeyValue, Method, Request, TextKind};
+use domain::http::{Body, CancelFlag, FormField, HttpSender, KeyValue, Method, Request, TextKind};
 
 /// One-shot local server: answers `response`, returns the raw request bytes.
 fn serve_raw(response: Vec<u8>) -> (String, JoinHandle<Vec<u8>>) {
@@ -83,7 +84,7 @@ fn status_headers_and_body() {
     let (base, server) = serve(reply(b"hello", "X-Test: 1\r\n"));
     let resp = ReqwestSender::new()
         .unwrap()
-        .send(&get(format!("{base}/path")))
+        .send(&get(format!("{base}/path")), &CancelFlag::new())
         .unwrap();
     server.join().unwrap();
     assert_eq!((resp.status, resp.status_text.as_str()), (200, "OK"));
@@ -110,7 +111,10 @@ fn active_params_are_appended_to_the_url() {
         },
         KeyValue::new("", "blank key"),
     ];
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     assert!(
         server
             .join()
@@ -129,7 +133,10 @@ fn content_type_is_not_duplicated() {
         kind: TextKind::Json,
         text: "{}".into(),
     };
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert_eq!(raw.matches("content-type:").count(), 1);
     assert!(raw.contains("content-type: application/vnd.api+json"));
@@ -144,7 +151,10 @@ fn body_kind_sets_content_type_when_user_did_not() {
         kind: TextKind::Json,
         text: "{}".into(),
     };
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     assert!(
         server
             .join()
@@ -160,9 +170,10 @@ fn closed_port_is_connection_refused() {
         .local_addr()
         .unwrap()
         .port();
-    let result = ReqwestSender::new()
-        .unwrap()
-        .send(&get(format!("http://127.0.0.1:{port}/")));
+    let result = ReqwestSender::new().unwrap().send(
+        &get(format!("http://127.0.0.1:{port}/")),
+        &CancelFlag::new(),
+    );
     assert!(
         matches!(result, Err(AppError::ConnectionRefused(_))),
         "{result:?}"
@@ -173,7 +184,7 @@ fn closed_port_is_connection_refused() {
 fn url_without_scheme_is_invalid_url() {
     let result = ReqwestSender::new()
         .unwrap()
-        .send(&get("httpbin.org/get".into()));
+        .send(&get("httpbin.org/get".into()), &CancelFlag::new());
     assert!(matches!(result, Err(AppError::InvalidUrl(_))), "{result:?}");
 }
 
@@ -182,7 +193,7 @@ fn unsupported_body_is_never_sent() {
     let mut req = get("http://127.0.0.1:9/".into());
     req.body = Body::Unsupported("form-data".into());
     assert!(matches!(
-        ReqwestSender::new().unwrap().send(&req),
+        ReqwestSender::new().unwrap().send(&req, &CancelFlag::new()),
         Err(AppError::Request(_))
     ));
 }
@@ -192,7 +203,10 @@ fn large_body_is_cut_on_a_char_boundary() {
     // 3-byte chars: the 1 MiB cut lands mid-char
     let body = "€".repeat(1024 * 1024 / 3 + 10);
     let (base, server) = serve(reply(body.as_bytes(), ""));
-    let resp = ReqwestSender::new().unwrap().send(&get(base)).unwrap();
+    let resp = ReqwestSender::new()
+        .unwrap()
+        .send(&get(base), &CancelFlag::new())
+        .unwrap();
     server.join().unwrap();
     assert!(resp.truncated);
     assert_eq!(resp.size_bytes, body.len() as u64);
@@ -203,7 +217,10 @@ fn large_body_is_cut_on_a_char_boundary() {
 #[test]
 fn binary_body_is_described() {
     let (base, server) = serve(reply(&[0xff, 0xfe, 0x00, 0x89], ""));
-    let resp = ReqwestSender::new().unwrap().send(&get(base)).unwrap();
+    let resp = ReqwestSender::new()
+        .unwrap()
+        .send(&get(base), &CancelFlag::new())
+        .unwrap();
     server.join().unwrap();
     assert_eq!(resp.body, "<binary data: 4 bytes>");
 }
@@ -230,12 +247,15 @@ fn bearer_sets_authorization() {
     let (base, server) = serve(reply(b"", ""));
     ReqwestSender::new()
         .unwrap()
-        .send(&with_auth(
-            base,
-            Auth::Bearer {
-                token: "abc".into(),
-            },
-        ))
+        .send(
+            &with_auth(
+                base,
+                Auth::Bearer {
+                    token: "abc".into(),
+                },
+            ),
+            &CancelFlag::new(),
+        )
         .unwrap();
     assert!(
         server
@@ -254,7 +274,7 @@ fn basic_is_base64_of_user_and_password() {
     };
     ReqwestSender::new()
         .unwrap()
-        .send(&with_auth(base, auth))
+        .send(&with_auth(base, auth), &CancelFlag::new())
         .unwrap();
     // base64("user:pass") = dXNlcjpwYXNz, lowercased by serve()
     assert!(
@@ -275,7 +295,7 @@ fn api_key_goes_to_header_or_query() {
     };
     ReqwestSender::new()
         .unwrap()
-        .send(&with_auth(base, auth))
+        .send(&with_auth(base, auth), &CancelFlag::new())
         .unwrap();
     assert!(server.join().unwrap().contains("x-key: k1\r\n"));
 
@@ -289,7 +309,10 @@ fn api_key_goes_to_header_or_query() {
         },
     );
     req.params = vec![KeyValue::new("q", "1")];
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     assert!(server.join().unwrap().starts_with("get /s?q=1&api_key=k2 "));
 }
 
@@ -303,7 +326,10 @@ fn user_authorization_header_wins() {
         },
     );
     req.headers = vec![KeyValue::new("Authorization", "Custom x")];
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert_eq!(raw.matches("authorization:").count(), 1);
     assert!(raw.contains("authorization: custom x\r\n"));
@@ -319,7 +345,7 @@ fn api_key_with_empty_name_is_skipped() {
     };
     let resp = ReqwestSender::new()
         .unwrap()
-        .send(&with_auth(base, auth))
+        .send(&with_auth(base, auth), &CancelFlag::new())
         .unwrap();
     server.join().unwrap();
     assert_eq!(resp.status, 200);
@@ -332,7 +358,7 @@ fn unsupported_auth_is_never_sent() {
         Auth::Unsupported("oauth2".into()),
     );
     assert!(matches!(
-        ReqwestSender::new().unwrap().send(&req),
+        ReqwestSender::new().unwrap().send(&req, &CancelFlag::new()),
         Err(AppError::Request(m)) if m == "oauth2 auth is not supported"
     ));
 }
@@ -351,7 +377,10 @@ fn urlencoded_body_is_encoded() {
             },
         ]),
     );
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert!(raw.contains("content-type: application/x-www-form-urlencoded"));
     assert!(raw.ends_with("\r\n\r\nq=a+b%26c"));
@@ -362,7 +391,10 @@ fn urlencoded_keeps_a_user_content_type() {
     let (base, server) = serve(reply(b"", ""));
     let mut req = post(base, Body::Urlencoded(vec![KeyValue::new("a", "1")]));
     req.headers = vec![KeyValue::new("Content-Type", "text/plain")];
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert_eq!(raw.matches("content-type:").count(), 1);
     assert!(raw.contains("content-type: text/plain"));
@@ -382,7 +414,10 @@ fn form_data_sends_text_and_file_parts() {
         ]),
     );
     req.headers = vec![KeyValue::new("Content-Type", "text/plain")];
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert_eq!(
         raw.matches("content-type: multipart/form-data; boundary=")
@@ -403,7 +438,10 @@ fn binary_sends_file_bytes() {
     std::fs::write(&bin, [0u8, 0xff, 0x10, b'A']).unwrap();
     let (base, server) = serve_raw(reply(b"", ""));
     let req = post(base, Body::Binary(bin.display().to_string()));
-    ReqwestSender::new().unwrap().send(&req).unwrap();
+    ReqwestSender::new()
+        .unwrap()
+        .send(&req, &CancelFlag::new())
+        .unwrap();
     let raw = server.join().unwrap();
     assert!(raw.ends_with(&[b'\r', b'\n', b'\r', b'\n', 0, 0xff, 0x10, b'A']));
     assert!(
@@ -411,6 +449,9 @@ fn binary_sends_file_bytes() {
             .to_lowercase()
             .contains("content-type: application/octet-stream")
     );
+    let head = String::from_utf8_lossy(&raw).to_lowercase();
+    assert!(head.contains("content-length: 4"), "{head}");
+    assert!(!head.contains("transfer-encoding: chunked"), "{head}");
 }
 
 #[test]
@@ -424,7 +465,10 @@ fn bad_file_paths_are_file_errors() {
     for path in paths {
         let binary = post("http://127.0.0.1:9/".into(), Body::Binary(path.clone()));
         assert_eq!(
-            ReqwestSender::new().unwrap().send(&binary).unwrap_err(),
+            ReqwestSender::new()
+                .unwrap()
+                .send(&binary, &CancelFlag::new())
+                .unwrap_err(),
             AppError::File(path.clone())
         );
         let form = post(
@@ -432,8 +476,35 @@ fn bad_file_paths_are_file_errors() {
             Body::FormData(vec![FormField::file("f", path.clone())]),
         );
         assert_eq!(
-            ReqwestSender::new().unwrap().send(&form).unwrap_err(),
+            ReqwestSender::new()
+                .unwrap()
+                .send(&form, &CancelFlag::new())
+                .unwrap_err(),
             AppError::File(path)
         );
     }
+}
+
+#[test]
+fn cancel_closes_a_request_that_never_answers() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let url = format!("http://{}/", listener.local_addr().expect("addr"));
+    // accept and hold the socket: the reply never comes
+    let server = thread::spawn(move || listener.accept().expect("accept"));
+    let cancel = CancelFlag::new();
+    let flag = cancel.clone();
+    let canceller = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        flag.cancel();
+    });
+    let start = Instant::now();
+    let result = ReqwestSender::new().unwrap().send(&get(url), &cancel);
+    assert_eq!(result, Err(AppError::Cancelled));
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        start.elapsed()
+    );
+    canceller.join().unwrap();
+    drop(server.join().unwrap());
 }

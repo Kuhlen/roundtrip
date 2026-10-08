@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use domain::AppError;
 use domain::collection::Protocol;
-use domain::http::{Request, Response};
+use domain::http::{CancelFlag, Request, Response};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use super::tabs_rules::TabFile;
@@ -25,6 +25,8 @@ pub(crate) struct Tab {
     pub(crate) dirty: bool,
     pub(crate) pinned: bool,
     pub(crate) response: ResponseView,
+    /// send number + flag while a request is in flight
+    pub(crate) sending: Option<(u64, CancelFlag)>,
 }
 
 /// Every form property of WorkspaceState, so a switch back restores the exact form.
@@ -129,6 +131,13 @@ pub(crate) struct ResponseView {
 }
 
 impl ResponseView {
+    pub(crate) fn cancelled() -> Self {
+        Self {
+            status: SendStatus::Cancelled,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn sending() -> Self {
         Self {
             status: SendStatus::Sending,
@@ -162,11 +171,7 @@ impl ResponseView {
             Ok(r) => Self {
                 status: SendStatus::Done,
                 status_text: format!("{} {}", r.status, r.status_text).into(),
-                status_class: match r.status {
-                    500.. => StatusClass::Err,
-                    300.. => StatusClass::Warn,
-                    _ => StatusClass::Ok,
-                },
+                status_class: status_class(r.status),
                 elapsed: format!("{} ms", r.elapsed.as_millis()).into(),
                 size: workspace_rules::format_size(r.size_bytes).into(),
                 truncated: r.truncated,
@@ -211,5 +216,14 @@ impl ResponseView {
         s.set_fail_title(self.fail_title.clone());
         s.set_fail_hint(self.fail_hint.clone());
         s.set_fail_detail(self.fail_detail.clone());
+    }
+}
+
+/// Same colours in the response panel and the history list.
+pub(crate) fn status_class(code: u16) -> StatusClass {
+    match code {
+        500.. => StatusClass::Err,
+        300.. => StatusClass::Warn,
+        _ => StatusClass::Ok,
     }
 }

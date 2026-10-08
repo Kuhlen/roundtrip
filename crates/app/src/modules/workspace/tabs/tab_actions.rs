@@ -62,6 +62,7 @@ impl WorkspaceController {
             dirty: false,
             pinned: false,
             response: ResponseView::default(),
+            sending: None,
         });
         Ok(Some(id))
     }
@@ -151,6 +152,16 @@ impl WorkspaceController {
         self.switch_to(id);
     }
 
+    /// Scratch tab holding `request` as saved: clean until edited.
+    pub(crate) fn open_untitled(&self, request: Request) {
+        let at = self.tabs.borrow().len();
+        let id = self.insert_untitled(None, Protocol::Http, at);
+        if let Some(t) = self.tabs.borrow_mut().iter_mut().find(|t| t.id == id) {
+            t.saved = request;
+        }
+        self.switch_to(id);
+    }
+
     /// Scratch copy of tab `index`'s form, right after it; dirty since nothing is saved.
     pub(crate) fn duplicate_tab(&self, index: usize) {
         let Some((id, protocol)) = self.tabs.borrow().get(index).map(|t| (t.id, t.protocol)) else {
@@ -189,6 +200,7 @@ impl WorkspaceController {
                 dirty: false,
                 pinned: false,
                 response: ResponseView::default(),
+                sending: None,
             },
         );
         id
@@ -253,9 +265,14 @@ impl WorkspaceController {
     pub(super) fn remove_tab(&self, index: usize) {
         let removed = {
             let mut tabs = self.tabs.borrow_mut();
-            (index < tabs.len()).then(|| tabs.remove(index).id)
+            (index < tabs.len()).then(|| tabs.remove(index))
         };
-        let Some(id) = removed else { return };
+        let Some(tab) = removed else { return };
+        // nothing keeps running for a closed tab
+        if let Some((_, cancel)) = &tab.sending {
+            cancel.cancel();
+        }
+        let id = tab.id;
         if self.active.get() == Some(id) {
             self.autosave.stop();
             // nothing to capture: the tab is gone

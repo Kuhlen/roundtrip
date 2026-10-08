@@ -4,6 +4,8 @@ import { WorkspaceState, TreeRow } from "../workspace_state.slint";
 import { Btn } from "../../../widgets/btn.slint";
 import { Field } from "../../../widgets/field.slint";
 import { Select } from "../../../widgets/select.slint";
+import { Tab } from "../../../widgets/tab.slint";
+import { HistoryPanel } from "../history/history_panel.slint";
 
 component TreeLine inherits Rectangle {
     in property <TreeRow> item;
@@ -132,7 +134,34 @@ export component Sidebar inherits Rectangle {
     callback focus-tree();
     background: Theme.side;
     VerticalLayout {
-        VerticalLayout {
+        HorizontalLayout {
+            height: 36px;
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 16px;
+            alignment: start;
+            Tab {
+                text: "Collections";
+                active: !WorkspaceState.show-history;
+                clicked => {
+                    // swap destroys a focused Select or Field; refocus root so shortcuts live
+                    root.focus-tree();
+                    WorkspaceState.show-history = false;
+                }
+            }
+            Tab {
+                text: "History";
+                active: WorkspaceState.show-history;
+                clicked => {
+                    root.focus-tree();
+                    WorkspaceState.show-history = true;
+                    // fresh "5m ago" on every visit
+                    WorkspaceState.history-refresh();
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line-soft; }
+        if !WorkspaceState.show-history: VerticalLayout {
             padding-left: 14px;
             padding-right: 14px;
             padding-top: 14px;
@@ -187,8 +216,8 @@ export component Sidebar inherits Rectangle {
                 selected => { WorkspaceState.environment-selected(); }
             }
         }
-        Rectangle { height: 1px; background: Theme.line-soft; }
-        if !WorkspaceState.has-collection: VerticalLayout {
+        if !WorkspaceState.show-history: Rectangle { height: 1px; background: Theme.line-soft; }
+        if !WorkspaceState.show-history && !WorkspaceState.has-collection: VerticalLayout {
             vertical-stretch: 1;
             alignment: center;
             padding: 24px;
@@ -200,7 +229,7 @@ export component Sidebar inherits Rectangle {
                 wrap: word-wrap;
             }
         }
-        if WorkspaceState.has-collection: VerticalLayout {
+        if !WorkspaceState.show-history && WorkspaceState.has-collection: VerticalLayout {
             vertical-stretch: 1;
             padding-top: 6px;
             padding-bottom: 6px;
@@ -223,5 +252,6 @@ export component Sidebar inherits Rectangle {
                 }
             }
         }
+        if WorkspaceState.show-history: HistoryPanel { vertical-stretch: 1; }
     }
 }

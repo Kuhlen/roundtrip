@@ -292,6 +292,8 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
             "Variables: invalid JSON".into(),
             "Fix Variables before saving.",
         ),
+        AppError::Cancelled => ("Request cancelled".into(), ""),
+        AppError::History(msg) => return ("History error".into(), msg.clone()),
         AppError::Storage(msg) => return ("Could not read or write a file".into(), msg.clone()),
     };
     (title, hint.into())

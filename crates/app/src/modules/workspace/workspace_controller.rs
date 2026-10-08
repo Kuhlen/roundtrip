@@ -10,6 +10,7 @@ use domain::AppError;
 use domain::collection::{Collection, CollectionStore};
 use domain::environment::{Environment, EnvironmentStore};
 use domain::graphql::GraphqlBody;
+use domain::history::HistoryStore;
 use domain::http::{Body, HttpSender, Method};
 use domain::session::SessionStore;
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, VecModel};
@@ -25,6 +26,8 @@ pub struct Deps {
     pub environments: Rc<dyn EnvironmentStore>,
     pub sender: Arc<dyn HttpSender>,
     pub session: Rc<dyn SessionStore>,
+    /// Err: history.db could not be opened; the panel shows why, Send still works
+    pub history: Result<Arc<dyn HistoryStore>, AppError>,
     /// `$uuid` & co, tried after environment variables
     pub dynamic_var: fn(&str) -> Option<String>,
     pub pretty_json: fn(&str) -> Option<String>,
@@ -58,6 +61,10 @@ pub struct WorkspaceController {
     /// id of the shown tab
     pub(crate) active: Cell<Option<u64>>,
     pub(crate) next_id: Cell<u64>,
+    /// last send number; a result carrying an older one is stale
+    pub(super) send_seq: Cell<u64>,
+    /// ids of the shown history rows, by row index
+    pub(super) history_ids: RefCell<Vec<i64>>,
     pub(super) me: Weak<WorkspaceController>,
     pub(super) autosave: slint::Timer,
     pub(super) pending: RefCell<Option<PendingAction>>,
@@ -87,6 +94,8 @@ impl WorkspaceController {
             tabs: RefCell::default(),
             active: Cell::default(),
             next_id: Cell::default(),
+            send_seq: Cell::default(),
+            history_ids: RefCell::default(),
             pending: RefCell::default(),
             editing: RefCell::default(),
             params: Rc::new(VecModel::default()),
@@ -117,6 +126,8 @@ impl WorkspaceController {
         s.set_dialog_kind(DialogKind::Untitled);
         s.set_confirm_folder(false);
         s.set_active_row(-1);
+        s.set_show_history(false);
+        s.set_history_query("".into());
         s.set_save_as_open(false);
         s.set_save_as_name("".into());
         s.set_save_as_collections(ModelRc::default());
@@ -127,6 +138,7 @@ impl WorkspaceController {
         this.clear_request(&s);
         this.push_tabs();
         this.wire(&s);
+        this.load_history();
         let weak = this.me.clone();
         ui.window().on_close_requested(move || {
             weak.upgrade()
@@ -149,6 +161,10 @@ impl WorkspaceController {
         s.on_environment_selected(on(Self::environment_selected));
         s.on_changed(on(Self::changed));
         s.on_send(on(Self::send));
+        s.on_history_refresh(on(Self::load_history));
+        s.on_history_clear(on(Self::ask_clear_history));
+        s.on_confirm_clear_history(on(Self::confirm_clear_history));
+        s.on_cancel(on(Self::cancel));
         s.on_response_ready(on(Self::deliver_responses));
         s.on_save(on(|c| {
             c.save();
@@ -173,6 +189,7 @@ impl WorkspaceController {
             }
         };
         s.on_row_clicked(on_index(Self::row_clicked));
+        s.on_history_clicked(on_index(Self::open_history));
         s.on_tab_clicked(on_index(|c, i| {
             if let Some(id) = c.tab_id(i) {
                 c.switch_to(id);
