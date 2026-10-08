@@ -115,12 +115,24 @@ export global WorkspaceState {
     in-out property <int> save-as-folder-index;
     in property <string> save-as-error;
 
+    // import dialog
+    in property <bool> import-open;
+    in-out property <string> import-name;
+    // "1 folder · 2 requests · 1 environment"
+    in property <string> import-counts;
+    in property <[string]> import-warnings;
+    in property <string> import-error;
+
     out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked && self.body-error == "";
 
     callback open-collection();
     callback environment-selected();
     callback row-clicked(int);
     callback changed();
+    // URL field edit; a pasted curl command fills the request
+    callback url-edited();
+    // active request as a curl command; "" = can't, banner says why
+    callback curl-command() -> string;
     // -1 = binary path, >= 0 = form row
     callback pick-file(int);
     callback kv-edited(KvTable, int);
@@ -136,6 +148,9 @@ export global WorkspaceState {
     callback confirm-discard();
     callback save-as-confirm();
     callback save-as-cancel();
+    callback import-collection();
+    callback import-confirm();
+    callback import-cancel();
     callback save-as-collection-selected();
     callback open-settings();
     callback save-settings();

@@ -10,6 +10,7 @@ use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::http::{Body, KeyValue, Method, Request};
+use domain::import::ImportedCollection;
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 
@@ -180,6 +181,14 @@ impl CollectionStore for CollectionDir {
         }
         .map_err(|e| storage(path, e))
     }
+
+    fn create_collection(
+        &self,
+        parent: &Path,
+        data: &ImportedCollection,
+    ) -> Result<PathBuf, AppError> {
+        crate::collection_import::write(parent, data)
+    }
 }
 
 /// Request-file YAML without `name`; history stores requests in this shape.
@@ -209,7 +218,7 @@ fn to_request(raw: RequestFile, file: &Path) -> Result<Request, AppError> {
 }
 
 /// Keys `save_request` owns; others in `doc` stay as they are.
-fn fill_doc(doc: &mut Mapping, request: &Request) {
+pub(crate) fn fill_doc(doc: &mut Mapping, request: &Request) {
     doc.insert("method".into(), request.method.as_str().into());
     doc.insert("url".into(), request.url.as_str().into());
     set_pairs(doc, "params", &request.params);
@@ -370,7 +379,7 @@ fn parse_auth(v: Option<&Value>) -> Option<Auth> {
 }
 
 /// None removes the key; Unsupported leaves it as the file has it.
-fn set_auth(doc: &mut Mapping, auth: Option<&Auth>) {
+pub(crate) fn set_auth(doc: &mut Mapping, auth: Option<&Auth>) {
     let pairs: Vec<(&str, &str)> = match auth {
         None => {
             doc.shift_remove("auth");
@@ -408,7 +417,7 @@ fn read_doc(file: &Path) -> Result<Mapping, AppError> {
 }
 
 /// `.tmp` + rename: a crash never leaves half a file.
-fn write_atomic(file: &Path, doc: &Mapping) -> Result<(), AppError> {
+pub(crate) fn write_atomic(file: &Path, doc: &Mapping) -> Result<(), AppError> {
     let yaml = serde_yaml::to_string(doc).map_err(|e| invalid(file, e))?;
     let tmp = tmp_path(file);
     fs::write(&tmp, yaml).map_err(|e| storage(&tmp, e))?;
@@ -448,7 +457,7 @@ fn invalid(path: &Path, e: serde_yaml::Error) -> AppError {
 }
 
 /// Upstream rename rule; empty or leading dot → InvalidName (the tree scan hides dot names).
-fn clean_name(name: &str) -> Result<String, AppError> {
+pub(crate) fn clean_name(name: &str) -> Result<String, AppError> {
     let replaced: String = name
         .chars()
         .map(|c| {
@@ -467,7 +476,7 @@ fn clean_name(name: &str) -> Result<String, AppError> {
 }
 
 /// Upstream new-request rule: lowercase, whitespace runs → '-'.
-fn request_stem(name: &str) -> Result<String, AppError> {
+pub(crate) fn request_stem(name: &str) -> Result<String, AppError> {
     let stem = clean_name(name)?
         .to_lowercase()
         .split_whitespace()
@@ -504,7 +513,7 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-fn create_error(path: &Path, e: std::io::Error) -> AppError {
+pub(crate) fn create_error(path: &Path, e: std::io::Error) -> AppError {
     if e.kind() == ErrorKind::AlreadyExists {
         AppError::AlreadyExists(file_name(path))
     } else {

@@ -95,11 +95,7 @@ impl WorkspaceController {
     }
 
     pub(crate) fn pick_collection(&self) {
-        // sync dialog on the UI thread
-        if let Some(dir) = rfd::FileDialog::new()
-            .set_title("Open collection")
-            .pick_folder()
-        {
+        if let Some(dir) = (self.deps.pick_dir)() {
             self.open_collection(&dir);
         }
     }

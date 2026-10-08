@@ -1,0 +1,89 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+
+// modal; Enter in the name imports, Esc cancels
+export component ImportDialog inherits Rectangle {
+    property <bool> can-import: WorkspaceState.import-name != "";
+    background: Theme.scrim;
+    // scrim swallows clicks
+    TouchArea { }
+    // ancestor of the field: capture sees Escape before it
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                WorkspaceState.import-cancel();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: 480px;
+            height: col.preferred-height;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.line;
+            border-radius: 10px;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #00000080;
+            col := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: "Import Postman collection"; font-size: 15px; font-weight: 600; color: Theme.text; }
+                HorizontalLayout {
+                    spacing: 14px;
+                    Text { text: "NAME"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                    name := Field {
+                        horizontal-stretch: 1;
+                        text <=> WorkspaceState.import-name;
+                        placeholder: "Collection name";
+                        accepted => {
+                            if root.can-import {
+                                WorkspaceState.import-confirm();
+                            }
+                        }
+                    }
+                }
+                Text { text: WorkspaceState.import-counts; color: Theme.muted; }
+                if WorkspaceState.import-warnings.length > 0: ListView {
+                    // ponytail: fixed row height, long warnings elide; wrap if users miss text
+                    height: min(5, WorkspaceState.import-warnings.length) * 22px;
+                    for line in WorkspaceState.import-warnings: Text {
+                        height: 22px;
+                        text: "⚠ " + line;
+                        color: Theme.warn;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                }
+                if WorkspaceState.import-error != "": Text {
+                    text: WorkspaceState.import-error;
+                    color: Theme.err;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    padding-top: 6px;
+                    spacing: 8px;
+                    alignment: end;
+                    Btn {
+                        text: "Cancel";
+                        ghost: true;
+                        clicked => { WorkspaceState.import-cancel(); }
+                    }
+                    Btn {
+                        text: "Import…";
+                        primary: true;
+                        enabled: root.can-import;
+                        clicked => { WorkspaceState.import-confirm(); }
+                    }
+                }
+            }
+        }
+    }
+    init => { name.focus(); }
+}

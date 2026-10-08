@@ -2,13 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, flatten, flatten_collections, folder_choices, format_size, inherit_note,
-    interpolate_request, resolve_files, resolved_url, row_label, unsupported_body_note,
+    RowKind, error_text, flatten, flatten_collections, folder_choices, format_size, import_counts,
+    import_warnings, inherit_note, interpolate_request, is_curl_paste, resolve_files, resolved_url,
+    row_label, unsupported_body_note,
 };
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
+use domain::import::ImportWarning;
 
 fn request(name: &str, path: &str) -> Node {
     Node::Request {
@@ -410,5 +412,60 @@ fn interpolate_request_fills_form_fields_and_paths() {
     assert_eq!(
         out(Body::Binary("{{dir}}/x.bin".into())),
         Body::Binary("/d/x.bin".into())
+    );
+}
+
+#[test]
+fn curl_paste_is_told_apart_from_typing() {
+    // pasted into an empty field
+    assert!(is_curl_paste("", "curl https://x.test"));
+    // pasted over a selected URL, longer or shorter
+    assert!(is_curl_paste(
+        "https://a.very.long.test/path/that/is/long",
+        "curl https://x.test"
+    ));
+    assert!(is_curl_paste(
+        "https://a.test",
+        "curl -H 'A: 1' https://x.test"
+    ));
+    // typing letter by letter
+    assert!(!is_curl_paste("curl", "curl "));
+    assert!(!is_curl_paste("curl ", "curl h"));
+    assert!(!is_curl_paste("curl https://x.tes", "curl https://x.test"));
+    // not curl at all
+    assert!(!is_curl_paste("", "https://curl.test"));
+    assert!(!is_curl_paste("", "curling"));
+}
+
+#[test]
+fn import_counts_read_naturally() {
+    assert_eq!(
+        import_counts((1, 2, 1)),
+        "1 folder · 2 requests · 1 environment"
+    );
+    assert_eq!(import_counts((0, 1, 0)), "1 request");
+    assert_eq!(
+        import_counts((3, 0, 2)),
+        "3 folders · 0 requests · 2 environments"
+    );
+}
+
+#[test]
+fn import_warnings_are_grouped_with_counts() {
+    let lines = import_warnings(&[
+        ImportWarning::UnsupportedAuth("oauth2".into()),
+        ImportWarning::Scripts,
+        ImportWarning::UnsupportedAuth("oauth2".into()),
+        ImportWarning::UnsupportedAuth("digest".into()),
+        ImportWarning::CollectionScriptsDropped,
+    ]);
+    assert_eq!(
+        lines,
+        vec![
+            "oauth2 auth is not supported; those requests inherit the collection auth, if any (2×)",
+            "Scripts are kept in the files but not run",
+            "digest auth is not supported; those requests inherit the collection auth, if any",
+            "Collection and folder scripts were left out",
+        ]
     );
 }

@@ -25,6 +25,9 @@ pub fn build(ui: &AppWindow) -> Result<Rc<WorkspaceController>, AppError> {
         dynamic_var: data::dynamic_vars::resolve,
         pretty_json: data::http::pretty_json,
         pick_file,
+        read_postman: data::postman::read,
+        pick_json,
+        pick_dir,
         graphql_parse: data::graphql::parse,
         graphql_json: data::graphql::to_json,
     };
@@ -39,4 +42,17 @@ fn pick_file(start: &Path) -> Option<PathBuf> {
         .set_title("Choose file")
         .set_directory(start)
         .pick_file()
+}
+
+fn pick_json() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Import Postman collection")
+        .add_filter("Postman collection", &["json"])
+        .pick_file()
+}
+
+fn pick_dir() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Choose folder")
+        .pick_folder()
 }

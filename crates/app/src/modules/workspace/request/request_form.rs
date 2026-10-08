@@ -138,6 +138,7 @@ impl WorkspaceController {
     pub(crate) fn changed(&self) {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
+        *self.last_url.borrow_mut() = s.get_url().to_string();
         let current = self.with_active(|t| {
             let form = self.form(&s, &t.saved);
             let error = self.body_error(&s);

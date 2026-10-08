@@ -181,22 +181,26 @@ export component Sidebar inherits Rectangle {
                     width: plus.preferred-width;
                     // Btn fixes its own height; preferred-height is smaller and lifts the "+"
                     height: plus.height;
-                    enabled: WorkspaceState.has-collection;
                     Menu {
                         MenuItem {
                             title: "New request";
+                            enabled: WorkspaceState.has-collection;
                             activated => { WorkspaceState.new-request(-1); }
                         }
                         MenuItem {
                             title: "New folder";
+                            enabled: WorkspaceState.has-collection;
                             activated => { WorkspaceState.new-folder(-1); }
+                        }
+                        MenuItem {
+                            title: "Import Postman collection…";
+                            activated => { WorkspaceState.import-collection(); }
                         }
                     }
                     plus := Btn {
                         text: "+";
                         small: true;
                         ghost: true;
-                        enabled: WorkspaceState.has-collection;
                         clicked => { add-menu.show({ x: 0px, y: self.height + 4px }); }
                     }
                 }

@@ -11,6 +11,30 @@ import { KvTableView } from "../../../snippets/kv_table.slint";
 
 // spans the editor and response columns
 export component RequestHeader inherits Rectangle {
+    property <bool> copied;
+
+    // Rust builds the text, Slint owns the clipboard
+    public function copy-curl() {
+        if !WorkspaceState.has-request {
+            return;
+        }
+        clip.text = WorkspaceState.curl-command();
+        if clip.text != "" {
+            clip.select-all();
+            clip.copy();
+            root.copied = true;
+        }
+    }
+
+    clip := TextInput {
+        visible: false;
+        single-line: false;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.copied;
+        triggered => { root.copied = false; }
+    }
     VerticalLayout {
         padding-left: 14px;
         padding-right: 14px;
@@ -47,7 +71,13 @@ export component RequestHeader inherits Rectangle {
                 text <=> WorkspaceState.url;
                 placeholder: "https://";
                 enabled: WorkspaceState.has-request;
-                edited => { WorkspaceState.changed(); }
+                edited => { WorkspaceState.url-edited(); }
+            }
+            Btn {
+                text: root.copied ? "Copied" : "cURL";
+                ghost: true;
+                enabled: WorkspaceState.has-request;
+                clicked => { root.copy-curl(); }
             }
             // one Btn: destroying the clicked (focused) one would drop focus and kill shortcuts
             Btn {

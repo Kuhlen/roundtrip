@@ -7,6 +7,7 @@ use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request};
+use domain::import::ImportWarning;
 use domain::interpolation::interpolate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,6 +295,7 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
         ),
         AppError::Cancelled => ("Request cancelled".into(), ""),
         AppError::History(msg) => return ("History error".into(), msg.clone()),
+        AppError::Import(msg) => return ("Import failed".into(), msg.clone()),
         AppError::Storage(msg) => return ("Could not read or write a file".into(), msg.clone()),
     };
     (title, hint.into())
@@ -360,4 +362,82 @@ pub fn folder_choices(collection: &Collection) -> Vec<(String, PathBuf)> {
     let mut out = vec![("/".to_owned(), collection.path.clone())];
     walk(&collection.children, "/", &mut out);
     out
+}
+
+/// A paste, not typing: `curl <something>` that was not curl before, or grew by more than a key.
+pub fn is_curl_paste(before: &str, after: &str) -> bool {
+    let Some(rest) = after.trim_start().strip_prefix("curl ") else {
+        return false;
+    };
+    !rest.trim().is_empty()
+        && (!before.trim_start().starts_with("curl ")
+            || after.chars().count() > before.chars().count() + 1)
+}
+
+/// "1 folder · 2 requests · 1 environment"; empty parts left out except requests.
+pub fn import_counts((folders, requests, environments): (usize, usize, usize)) -> String {
+    let plural = |n: usize, word: &str| {
+        if n == 1 {
+            format!("1 {word}")
+        } else {
+            format!("{n} {word}s")
+        }
+    };
+    let mut parts = Vec::new();
+    if folders > 0 {
+        parts.push(plural(folders, "folder"));
+    }
+    parts.push(plural(requests, "request"));
+    if environments > 0 {
+        parts.push(plural(environments, "environment"));
+    }
+    parts.join(" · ")
+}
+
+/// One line per kind, first-seen order, `(n×)` when repeated.
+pub fn import_warnings(warnings: &[ImportWarning]) -> Vec<String> {
+    let mut grouped: Vec<(&ImportWarning, usize)> = Vec::new();
+    for w in warnings {
+        match grouped.iter_mut().find(|(g, _)| *g == w) {
+            Some((_, n)) => *n += 1,
+            None => grouped.push((w, 1)),
+        }
+    }
+    grouped
+        .into_iter()
+        .map(|(w, n)| {
+            let text = match w {
+                ImportWarning::UnsupportedAuth(kind) => {
+                    format!(
+                        "{kind} auth is not supported; those requests inherit the collection auth, if any"
+                    )
+                }
+                ImportWarning::FolderAuth => {
+                    "Folder auth is not supported; requests use the collection auth".into()
+                }
+                ImportWarning::NoAuthInherits => {
+                    "\"No auth\" requests will send the collection auth".into()
+                }
+                ImportWarning::PathVariables => {
+                    "Path variables (:name) stay in the URL; fill them in by hand".into()
+                }
+                ImportWarning::Scripts => "Scripts are kept in the files but not run".into(),
+                ImportWarning::CollectionScriptsDropped => {
+                    "Collection and folder scripts were left out".into()
+                }
+                ImportWarning::DisabledDropped => {
+                    "Disabled headers, params and variables were left out".into()
+                }
+                ImportWarning::UnknownMethod(m) => {
+                    format!("{m} requests were skipped: method not supported")
+                }
+                ImportWarning::UnsupportedBody(mode) => format!("{mode} bodies were left out"),
+            };
+            if n > 1 {
+                format!("{text} ({n}×)")
+            } else {
+                text
+            }
+        })
+        .collect()
 }

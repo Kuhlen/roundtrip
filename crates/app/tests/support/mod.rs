@@ -17,12 +17,20 @@ use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::environment::{Environment, EnvironmentStore, Scope};
 use domain::history::{HistoryEntry, HistoryStore};
 use domain::http::{Body, CancelFlag, HttpSender, KeyValue, Method, Request, Response, TextKind};
+use domain::import::ImportedCollection;
 use domain::session::{Session, SessionStore};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode};
 
 thread_local! {
     /// what the fake file picker returns; None = cancelled
     pub static PICKED: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// fake JSON picker; None = cancelled
+    pub static PICKED_JSON: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// fake folder picker; None = cancelled
+    pub static PICKED_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// what the fake Postman reader returns
+    pub static IMPORTED: RefCell<Result<ImportedCollection, AppError>> =
+        RefCell::new(Err(AppError::Import("no fixture".into())));
 }
 
 pub const ROOT: &str = "/c";
@@ -96,6 +104,7 @@ pub struct FakeCollections {
     /// (collection root, auth)
     pub auth_saves: RefCell<Vec<(PathBuf, Option<Auth>)>>,
     pub deleted: RefCell<Vec<PathBuf>>,
+    pub created: RefCell<Vec<(PathBuf, ImportedCollection)>>,
 }
 
 impl Default for FakeCollections {
@@ -109,6 +118,7 @@ impl Default for FakeCollections {
             edit_error: RefCell::default(),
             auth_saves: RefCell::default(),
             deleted: RefCell::default(),
+            created: RefCell::default(),
         }
     }
 }
@@ -119,6 +129,13 @@ impl CollectionStore for FakeCollections {
             Ok(self.tree.borrow().clone())
         } else if dir == Path::new(ORDERS) {
             Ok(self.orders.borrow().clone())
+        } else if let Some((root, data)) = self.created.borrow().iter().find(|(r, _)| r == dir) {
+            Ok(Collection {
+                name: data.name.clone(),
+                path: root.clone(),
+                children: vec![],
+                auth: data.auth.clone(),
+            })
         } else {
             Err(AppError::NotACollection(dir.display().to_string()))
         }
@@ -247,6 +264,19 @@ impl CollectionStore for FakeCollections {
         self.files.borrow_mut().retain(|k, _| !k.starts_with(path));
         self.deleted.borrow_mut().push(path.to_path_buf());
         Ok(())
+    }
+
+    fn create_collection(
+        &self,
+        parent: &Path,
+        data: &ImportedCollection,
+    ) -> Result<PathBuf, AppError> {
+        if let Some(e) = self.edit_error.borrow().clone() {
+            return Err(e);
+        }
+        let root = parent.join(&data.name);
+        self.created.borrow_mut().push((root.clone(), data.clone()));
+        Ok(root)
     }
 }
 
@@ -620,6 +650,9 @@ pub fn build_with(
         dynamic_var: |_| None,
         pretty_json: data::http::pretty_json,
         pick_file: |_| PICKED.with(|p| p.borrow().clone()),
+        read_postman: |_| IMPORTED.with(|i| i.borrow().clone()),
+        pick_json: || PICKED_JSON.with(|p| p.borrow().clone()),
+        pick_dir: || PICKED_DIR.with(|p| p.borrow().clone()),
         graphql_parse: data::graphql::parse,
         graphql_json: data::graphql::to_json,
     };

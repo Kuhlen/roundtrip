@@ -32,4 +32,6 @@ pub enum AppError {
     Cancelled,
     #[error("history error: {0}")]
     History(String),
+    #[error("import failed: {0}")]
+    Import(String),
 }

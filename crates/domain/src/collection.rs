@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppError;
 use crate::auth::Auth;
 use crate::http::{Method, Request};
+use crate::import::ImportedCollection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Protocol {
@@ -77,4 +78,10 @@ pub trait CollectionStore {
     fn rename(&self, path: &Path, new_name: &str) -> Result<PathBuf, AppError>;
     /// Permanent: no trash.
     fn delete(&self, path: &Path) -> Result<(), AppError>;
+    /// New folder `<parent>/<name>/`; AlreadyExists if it is there. All or nothing.
+    fn create_collection(
+        &self,
+        parent: &Path,
+        data: &ImportedCollection,
+    ) -> Result<PathBuf, AppError>;
 }

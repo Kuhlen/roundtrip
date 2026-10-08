@@ -12,6 +12,7 @@ use domain::environment::{Environment, EnvironmentStore};
 use domain::graphql::GraphqlBody;
 use domain::history::HistoryStore;
 use domain::http::{Body, HttpSender, Method};
+use domain::import::ImportedCollection;
 use domain::session::SessionStore;
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -33,6 +34,11 @@ pub struct Deps {
     pub pretty_json: fn(&str) -> Option<String>,
     /// sync file dialog, starting in the collection folder
     pub pick_file: fn(&Path) -> Option<PathBuf>,
+    /// `data::postman::read`
+    pub read_postman: fn(&Path) -> Result<ImportedCollection, AppError>,
+    /// sync dialogs; None = cancelled
+    pub pick_json: fn() -> Option<PathBuf>,
+    pub pick_dir: fn() -> Option<PathBuf>,
     pub graphql_parse: fn(&str) -> Option<GraphqlBody>,
     pub graphql_json: fn(&GraphqlBody) -> Result<String, AppError>,
 }
@@ -48,6 +54,8 @@ pub(crate) enum PendingAction {
 pub struct WorkspaceController {
     pub(super) deps: Deps,
     pub(super) ui: slint::Weak<AppWindow>,
+    // URL at the last changed(); tells a paste from typing
+    pub(super) last_url: RefCell<String>,
     /// open order; the first one owns the environments
     pub(super) collections: RefCell<Vec<Collection>>,
     // collection whose settings dialog is open
@@ -68,6 +76,8 @@ pub struct WorkspaceController {
     pub(super) me: Weak<WorkspaceController>,
     pub(super) autosave: slint::Timer,
     pub(super) pending: RefCell<Option<PendingAction>>,
+    // read file waiting in the import dialog
+    pub(super) pending_import: RefCell<Option<ImportedCollection>>,
     // row in rename mode
     pub(super) editing: RefCell<Option<PathBuf>>,
     pub(super) params: Rc<VecModel<KvRow>>,
@@ -85,6 +95,7 @@ impl WorkspaceController {
             autosave: slint::Timer::default(),
             deps,
             ui: ui.as_weak(),
+            last_url: RefCell::default(),
             collections: RefCell::default(),
             settings_target: RefCell::default(),
             collapsed: RefCell::default(),
@@ -97,6 +108,7 @@ impl WorkspaceController {
             send_seq: Cell::default(),
             history_ids: RefCell::default(),
             pending: RefCell::default(),
+            pending_import: RefCell::default(),
             editing: RefCell::default(),
             params: Rc::new(VecModel::default()),
             headers: Rc::new(VecModel::default()),
@@ -135,6 +147,11 @@ impl WorkspaceController {
         s.set_save_as_folders(ModelRc::default());
         s.set_save_as_folder_index(0);
         s.set_save_as_error("".into());
+        s.set_import_open(false);
+        s.set_import_name("".into());
+        s.set_import_counts("".into());
+        s.set_import_warnings(ModelRc::default());
+        s.set_import_error("".into());
         this.clear_request(&s);
         this.push_tabs();
         this.wire(&s);
@@ -160,6 +177,15 @@ impl WorkspaceController {
         s.on_open_collection(on(Self::ask_open_collection));
         s.on_environment_selected(on(Self::environment_selected));
         s.on_changed(on(Self::changed));
+        s.on_url_edited(on(Self::url_edited));
+        s.on_curl_command({
+            let weak = weak.clone();
+            move || {
+                weak.upgrade()
+                    .map(|c| c.curl_command().into())
+                    .unwrap_or_default()
+            }
+        });
         s.on_send(on(Self::send));
         s.on_history_refresh(on(Self::load_history));
         s.on_history_clear(on(Self::ask_clear_history));
@@ -175,6 +201,9 @@ impl WorkspaceController {
         s.on_confirm_discard(on(Self::confirm_discard));
         s.on_save_as_confirm(on(Self::save_as_confirm));
         s.on_save_as_cancel(on(Self::save_as_cancel));
+        s.on_import_collection(on(Self::import_collection));
+        s.on_import_confirm(on(Self::import_confirm));
+        s.on_import_cancel(on(Self::import_cancel));
         s.on_save_as_collection_selected(on(Self::save_as_collection_selected));
         s.on_tab_new(on(Self::new_tab));
         s.on_open_settings(on(Self::open_settings));
@@ -363,6 +392,11 @@ impl WorkspaceController {
             _ => None,
         };
         let (title, hint) = workspace_rules::error_text(e, root.as_deref());
+        self.notice(&title, &hint);
+    }
+
+    /// Banner text that does not come from an AppError.
+    pub(crate) fn notice(&self, title: &str, hint: &str) {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
         s.set_banner_title(title.into());
