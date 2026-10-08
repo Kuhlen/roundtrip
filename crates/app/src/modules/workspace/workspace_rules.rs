@@ -7,8 +7,10 @@ use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request};
-use domain::import::ImportWarning;
+use domain::import::{ExportReport, ExportWarning, ImportFormat, ImportWarning};
 use domain::interpolation::interpolate;
+
+pub use domain::http::resolve_files;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RowKind {
@@ -301,24 +303,6 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
     (title, hint.into())
 }
 
-/// Relative paths point into the collection, so the same file works on every machine.
-pub fn resolve_files(request: &mut Request, root: &Path) {
-    let resolve = |p: &mut String| {
-        // empty stays empty: the sender reports "no file chosen"
-        if !p.is_empty() && Path::new(p.as_str()).is_relative() {
-            *p = root.join(&*p).display().to_string();
-        }
-    };
-    match &mut request.body {
-        Body::Binary(path) => resolve(path),
-        Body::FormData(fields) => fields
-            .iter_mut()
-            .filter(|f| f.is_file)
-            .for_each(|f| resolve(&mut f.value)),
-        _ => {}
-    }
-}
-
 /// Note shown instead of a body editor.
 pub fn unsupported_body_note(kind: &str) -> String {
     if Body::KINDS.contains(&kind) {
@@ -374,15 +358,16 @@ pub fn is_curl_paste(before: &str, after: &str) -> bool {
             || after.chars().count() > before.chars().count() + 1)
 }
 
+fn plural(n: usize, word: &str) -> String {
+    if n == 1 {
+        format!("1 {word}")
+    } else {
+        format!("{n} {word}s")
+    }
+}
+
 /// "1 folder · 2 requests · 1 environment"; empty parts left out except requests.
 pub fn import_counts((folders, requests, environments): (usize, usize, usize)) -> String {
-    let plural = |n: usize, word: &str| {
-        if n == 1 {
-            format!("1 {word}")
-        } else {
-            format!("{n} {word}s")
-        }
-    };
     let mut parts = Vec::new();
     if folders > 0 {
         parts.push(plural(folders, "folder"));
@@ -419,7 +404,7 @@ pub fn import_warnings(warnings: &[ImportWarning]) -> Vec<String> {
                     "\"No auth\" requests will send the collection auth".into()
                 }
                 ImportWarning::PathVariables => {
-                    "Path variables (:name) stay in the URL; fill them in by hand".into()
+                    "Path variables (:id, {id}) stay in the URL; fill them in by hand".into()
                 }
                 ImportWarning::Scripts => "Scripts are kept in the files but not run".into(),
                 ImportWarning::CollectionScriptsDropped => {
@@ -432,6 +417,18 @@ pub fn import_warnings(warnings: &[ImportWarning]) -> Vec<String> {
                     format!("{m} requests were skipped: method not supported")
                 }
                 ImportWarning::UnsupportedBody(mode) => format!("{mode} bodies were left out"),
+                ImportWarning::UnsupportedRequest(kind) => {
+                    format!("{kind} requests were skipped: not supported")
+                }
+                ImportWarning::TemplateTags => {
+                    "Template tags ({% … %}) stay as text; replace them by hand".into()
+                }
+                ImportWarning::ExternalRef => "References to other files were left empty".into(),
+                ImportWarning::CookieParams => "Cookie parameters were left out".into(),
+                ImportWarning::FolderVariables => "Folder environments were left out".into(),
+                ImportWarning::OtherWorkspaces(n) => {
+                    format!("Only the first workspace was imported; {n} more were skipped")
+                }
             };
             if n > 1 {
                 format!("{text} ({n}×)")
@@ -440,4 +437,45 @@ pub fn import_warnings(warnings: &[ImportWarning]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+pub fn import_title(format: &ImportFormat) -> String {
+    match format {
+        ImportFormat::Postman => "Import Postman collection".into(),
+        ImportFormat::OpenApi(version) => format!("Import OpenAPI {version} spec"),
+        ImportFormat::Insomnia => "Import Insomnia collection".into(),
+    }
+}
+
+/// Banner (title, hint) after an export; `dirty` = that collection's unsaved tabs.
+pub fn export_lines(report: &ExportReport, dirty: usize) -> (String, String) {
+    let mut lines: Vec<String> = report
+        .warnings
+        .iter()
+        .map(|w| match *w {
+            ExportWarning::SkippedProtocol(n) => {
+                format!("{} skipped", plural(n, "WebSocket, SSE or gRPC request"))
+            }
+            ExportWarning::Unreadable(n) => {
+                format!("{} skipped", plural(n, "unreadable request file"))
+            }
+            ExportWarning::UnsupportedBody(n) => format!("Body type not supported, left out ({n})"),
+            ExportWarning::UnsupportedAuth(n) => format!("Auth type not supported, left out ({n})"),
+            ExportWarning::EnvironmentsNotExported(n) => format!(
+                "{} not exported; Postman keeps environments in separate files",
+                plural(n, "environment")
+            ),
+        })
+        .collect();
+    match dirty {
+        0 => {}
+        1 => lines.push("1 unsaved request exported in its saved state".into()),
+        n => lines.push(format!(
+            "{n} unsaved requests exported in their saved state"
+        )),
+    }
+    (
+        format!("Exported {}", plural(report.requests, "request")),
+        lines.join(". "),
+    )
 }

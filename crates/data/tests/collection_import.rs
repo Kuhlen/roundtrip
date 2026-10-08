@@ -57,6 +57,7 @@ fn shop() -> ImportedCollection {
             vec![("baseUrl".into(), "https://shop.test".into())],
         )],
         warnings: vec![],
+        ..ImportedCollection::default()
     }
 }
 

@@ -17,7 +17,7 @@ use domain::collection::{Collection, CollectionStore, Node, Protocol};
 use domain::environment::{Environment, EnvironmentStore, Scope};
 use domain::history::{HistoryEntry, HistoryStore};
 use domain::http::{Body, CancelFlag, HttpSender, KeyValue, Method, Request, Response, TextKind};
-use domain::import::ImportedCollection;
+use domain::import::{ExportReport, ImportedCollection};
 use domain::session::{Session, SessionStore};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode};
 
@@ -28,9 +28,16 @@ thread_local! {
     pub static PICKED_JSON: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// fake folder picker; None = cancelled
     pub static PICKED_DIR: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    /// what the fake Postman reader returns
+    /// what the fake import reader returns
     pub static IMPORTED: RefCell<Result<ImportedCollection, AppError>> =
         RefCell::new(Err(AppError::Import("no fixture".into())));
+    /// fake save dialog: what it returns (None = cancelled) and the file name it was offered
+    pub static SAVE_AS: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    pub static SAVE_OFFERED: RefCell<String> = const { RefCell::new(String::new()) };
+    /// fake exporter: its result and every (root, dest) it was called with
+    pub static EXPORTED: RefCell<Result<ExportReport, AppError>> =
+        RefCell::new(Ok(ExportReport::default()));
+    pub static EXPORT_CALLS: RefCell<Vec<(PathBuf, PathBuf)>> = const { RefCell::new(Vec::new()) };
 }
 
 pub const ROOT: &str = "/c";
@@ -650,9 +657,20 @@ pub fn build_with(
         dynamic_var: |_| None,
         pretty_json: data::http::pretty_json,
         pick_file: |_| PICKED.with(|p| p.borrow().clone()),
-        read_postman: |_| IMPORTED.with(|i| i.borrow().clone()),
-        pick_json: || PICKED_JSON.with(|p| p.borrow().clone()),
+        read_import: |_| IMPORTED.with(|i| i.borrow().clone()),
+        pick_import: || PICKED_JSON.with(|p| p.borrow().clone()),
         pick_dir: || PICKED_DIR.with(|p| p.borrow().clone()),
+        export_postman: |root, dest| {
+            EXPORT_CALLS.with(|c| {
+                c.borrow_mut()
+                    .push((root.to_path_buf(), dest.to_path_buf()))
+            });
+            EXPORTED.with(|e| e.borrow().clone())
+        },
+        pick_save: |name| {
+            SAVE_OFFERED.with(|o| *o.borrow_mut() = name.to_owned());
+            SAVE_AS.with(|p| p.borrow().clone())
+        },
         graphql_parse: data::graphql::parse,
         graphql_json: data::graphql::to_json,
     };

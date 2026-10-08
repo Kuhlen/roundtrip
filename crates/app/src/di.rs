@@ -25,9 +25,11 @@ pub fn build(ui: &AppWindow) -> Result<Rc<WorkspaceController>, AppError> {
         dynamic_var: data::dynamic_vars::resolve,
         pretty_json: data::http::pretty_json,
         pick_file,
-        read_postman: data::postman::read,
-        pick_json,
+        read_import: data::import_file::read,
+        pick_import,
         pick_dir,
+        export_postman: data::postman_export::write,
+        pick_save,
         graphql_parse: data::graphql::parse,
         graphql_json: data::graphql::to_json,
     };
@@ -44,10 +46,10 @@ fn pick_file(start: &Path) -> Option<PathBuf> {
         .pick_file()
 }
 
-fn pick_json() -> Option<PathBuf> {
+fn pick_import() -> Option<PathBuf> {
     rfd::FileDialog::new()
-        .set_title("Import Postman collection")
-        .add_filter("Postman collection", &["json"])
+        .set_title("Import collection")
+        .add_filter("Collection or API spec", &["json", "yaml", "yml"])
         .pick_file()
 }
 
@@ -55,4 +57,12 @@ fn pick_dir() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .set_title("Choose folder")
         .pick_folder()
+}
+
+fn pick_save(name: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Export as Postman")
+        .add_filter("Postman collection", &["json"])
+        .set_file_name(name)
+        .save_file()
 }

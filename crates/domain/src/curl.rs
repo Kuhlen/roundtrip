@@ -197,13 +197,17 @@ fn apply(p: &mut Parsed, flag: &str, value: String) -> Result<(), AppError> {
     Ok(())
 }
 
+/// URL without its query string, and that query as decoded rows.
+pub fn split_query(url: &str) -> (String, Vec<KeyValue>) {
+    match url.split_once('?') {
+        Some((base, query)) => (base.to_owned(), pairs(query)),
+        None => (url.to_owned(), Vec::new()),
+    }
+}
+
 fn build(p: Parsed) -> Result<CurlImport, AppError> {
     let url = p.url.ok_or_else(|| import("no URL in the curl command"))?;
-    let (base, query) = match url.split_once('?') {
-        Some((b, q)) => (b.to_owned(), pairs(q)),
-        None => (url, Vec::new()),
-    };
-    let mut params = query;
+    let (base, mut params) = split_query(&url);
     if !p.form.is_empty() && !p.data.is_empty() {
         return Err(import("-F cannot be mixed with -d"));
     }

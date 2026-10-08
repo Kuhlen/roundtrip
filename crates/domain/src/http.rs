@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -211,4 +212,22 @@ impl CancelFlag {
 pub trait HttpSender: Send + Sync {
     /// Blocking: call from a worker thread. Returns `Cancelled` soon after `cancel` is set.
     fn send(&self, request: &Request, cancel: &CancelFlag) -> Result<Response, AppError>;
+}
+
+/// Relative paths point into the collection, so the same file works on every machine.
+pub fn resolve_files(request: &mut Request, root: &Path) {
+    let resolve = |p: &mut String| {
+        // empty stays empty: the sender reports "no file chosen"
+        if !p.is_empty() && Path::new(p.as_str()).is_relative() {
+            *p = root.join(&*p).display().to_string();
+        }
+    };
+    match &mut request.body {
+        Body::Binary(path) => resolve(path),
+        Body::FormData(fields) => fields
+            .iter_mut()
+            .filter(|f| f.is_file)
+            .for_each(|f| resolve(&mut f.value)),
+        _ => {}
+    }
 }

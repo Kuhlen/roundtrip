@@ -15,6 +15,7 @@ component TreeLine inherits Rectangle {
     callback rename();
     callback delete();
     callback settings();
+    callback export-postman();
     callback close();
     callback rename-commit(string);
     callback rename-cancel();
@@ -115,6 +116,10 @@ component TreeLine inherits Rectangle {
                 activated => { root.settings(); }
             }
             if root.item.collection: MenuItem {
+                title: "Export as Postman…";
+                activated => { root.export-postman(); }
+            }
+            if root.item.collection: MenuItem {
                 title: "Close collection";
                 activated => { root.close(); }
             }
@@ -193,7 +198,7 @@ export component Sidebar inherits Rectangle {
                             activated => { WorkspaceState.new-folder(-1); }
                         }
                         MenuItem {
-                            title: "Import Postman collection…";
+                            title: "Import collection…";
                             activated => { WorkspaceState.import-collection(); }
                         }
                     }
@@ -249,6 +254,7 @@ export component Sidebar inherits Rectangle {
                     rename => { WorkspaceState.rename-start(i); }
                     delete => { WorkspaceState.delete-row(i); }
                     settings => { WorkspaceState.collection-settings(i); }
+                    export-postman => { WorkspaceState.export-collection(i); }
                     close => { WorkspaceState.close-collection(i); }
                     rename-commit(text) => { WorkspaceState.rename-commit(text); }
                     rename-cancel => { WorkspaceState.rename-cancel(); }

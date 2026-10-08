@@ -14,7 +14,11 @@ pub mod environment_dir;
 pub mod graphql;
 pub mod history_db;
 pub mod http;
-pub mod postman;
+pub mod import_file;
+mod insomnia;
+mod openapi;
+mod postman;
+pub mod postman_export;
 
 /// YAML scalar as text: numbers/bools keep their spelling, null is empty.
 pub(crate) fn scalar(v: &Value) -> String {
@@ -30,4 +34,13 @@ pub(crate) fn scalar(v: &Value) -> String {
 
 pub(crate) fn storage(path: &Path, e: std::io::Error) -> AppError {
     AppError::Storage(format!("{}: {e}", path.display()))
+}
+
+/// JSON string field; numbers and bools as written, missing or null = "".
+pub(crate) fn json_text(v: &serde_json::Value, key: &str) -> String {
+    match v.get(key) {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        None | Some(serde_json::Value::Null) => String::new(),
+        Some(other) => other.to_string(),
+    }
 }

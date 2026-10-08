@@ -11,7 +11,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::modules::workspace::workspace_controller::{
     PendingAction, WorkspaceController, strings,
 };
-use crate::modules::workspace::workspace_rules::{self, FlatRow, RowKind};
+use crate::modules::workspace::workspace_rules::{self, FlatRow, RowKind, export_lines};
 use crate::ui::{TreeRow, WorkspaceState};
 
 impl WorkspaceController {
@@ -47,6 +47,37 @@ impl WorkspaceController {
             self.changed();
         }
         self.save_session();
+    }
+
+    /// Saved state only: unsaved tabs are counted, never saved.
+    pub(crate) fn export_collection(&self, index: i32) {
+        let Some(root) = self.collection_row(index) else {
+            return;
+        };
+        let Some(name) = self
+            .collections
+            .borrow()
+            .iter()
+            .find(|c| c.path == root)
+            .map(|c| c.name.clone())
+        else {
+            return;
+        };
+        let dirty = self
+            .tab_ids(|t| t.dirty && t.file.as_ref().is_some_and(|f| f.collection == root))
+            .len();
+        // separators would turn the suggested name into a path
+        let stem = name.replace(['/', '\\', ':'], "-");
+        let Some(dest) = (self.deps.pick_save)(&format!("{stem}.postman_collection.json")) else {
+            return;
+        };
+        match (self.deps.export_postman)(&root, &dest) {
+            Ok(report) => {
+                let (title, hint) = export_lines(&report, dirty);
+                self.notice(&title, &hint);
+            }
+            Err(e) => self.banner(&e),
+        }
     }
 
     /// Root of the collection row at `index`.

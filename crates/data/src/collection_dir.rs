@@ -419,12 +419,17 @@ fn read_doc(file: &Path) -> Result<Mapping, AppError> {
 /// `.tmp` + rename: a crash never leaves half a file.
 pub(crate) fn write_atomic(file: &Path, doc: &Mapping) -> Result<(), AppError> {
     let yaml = serde_yaml::to_string(doc).map_err(|e| invalid(file, e))?;
+    write_text_atomic(file, &yaml)
+}
+
+pub(crate) fn write_text_atomic(file: &Path, text: &str) -> Result<(), AppError> {
     let tmp = tmp_path(file);
-    fs::write(&tmp, yaml).map_err(|e| storage(&tmp, e))?;
-    fs::rename(&tmp, file).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        storage(file, e)
-    })
+    fs::write(&tmp, text)
+        .and_then(|()| fs::rename(&tmp, file))
+        .map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            storage(file, e)
+        })
 }
 
 fn tmp_path(file: &Path) -> PathBuf {

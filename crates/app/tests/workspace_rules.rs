@@ -2,15 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, flatten, flatten_collections, folder_choices, format_size, import_counts,
-    import_warnings, inherit_note, interpolate_request, is_curl_paste, resolve_files, resolved_url,
-    row_label, unsupported_body_note,
+    RowKind, error_text, export_lines, flatten, flatten_collections, folder_choices, format_size,
+    import_counts, import_title, import_warnings, inherit_note, interpolate_request, is_curl_paste,
+    resolve_files, resolved_url, row_label, unsupported_body_note,
 };
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
-use domain::import::ImportWarning;
+use domain::import::{ExportReport, ExportWarning, ImportFormat, ImportWarning};
 
 fn request(name: &str, path: &str) -> Node {
     Node::Request {
@@ -468,4 +468,82 @@ fn import_warnings_are_grouped_with_counts() {
             "Collection and folder scripts were left out",
         ]
     );
+}
+
+#[test]
+fn import_title_names_the_format() {
+    assert_eq!(
+        import_title(&ImportFormat::Postman),
+        "Import Postman collection"
+    );
+    assert_eq!(
+        import_title(&ImportFormat::OpenApi("3.1.0".into())),
+        "Import OpenAPI 3.1.0 spec"
+    );
+    assert_eq!(
+        import_title(&ImportFormat::Insomnia),
+        "Import Insomnia collection"
+    );
+}
+
+#[test]
+fn new_import_warnings_have_text() {
+    let lines = import_warnings(&[
+        ImportWarning::UnsupportedRequest("gRPC".into()),
+        ImportWarning::TemplateTags,
+        ImportWarning::ExternalRef,
+        ImportWarning::CookieParams,
+        ImportWarning::FolderVariables,
+        ImportWarning::OtherWorkspaces(2),
+        ImportWarning::PathVariables,
+    ]);
+    assert_eq!(
+        lines,
+        vec![
+            "gRPC requests were skipped: not supported",
+            "Template tags ({% … %}) stay as text; replace them by hand",
+            "References to other files were left empty",
+            "Cookie parameters were left out",
+            "Folder environments were left out",
+            "Only the first workspace was imported; 2 more were skipped",
+            "Path variables (:id, {id}) stay in the URL; fill them in by hand",
+        ]
+    );
+}
+
+#[test]
+fn export_lines_count_and_explain() {
+    let report = ExportReport {
+        requests: 1,
+        warnings: vec![
+            ExportWarning::SkippedProtocol(2),
+            ExportWarning::Unreadable(1),
+            ExportWarning::UnsupportedBody(1),
+            ExportWarning::UnsupportedAuth(3),
+            ExportWarning::EnvironmentsNotExported(1),
+        ],
+    };
+    assert_eq!(
+        export_lines(&report, 0),
+        (
+            "Exported 1 request".to_owned(),
+            "2 WebSocket, SSE or gRPC requests skipped. \
+             1 unreadable request file skipped. \
+             Body type not supported, left out (1). \
+             Auth type not supported, left out (3). \
+             1 environment not exported; Postman keeps environments in separate files"
+                .to_owned()
+        )
+    );
+    let (title, hint) = export_lines(
+        &ExportReport {
+            requests: 3,
+            warnings: vec![],
+        },
+        2,
+    );
+    assert_eq!(title, "Exported 3 requests");
+    assert_eq!(hint, "2 unsaved requests exported in their saved state");
+    let (_, hint) = export_lines(&ExportReport::default(), 1);
+    assert_eq!(hint, "1 unsaved request exported in its saved state");
 }

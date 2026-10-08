@@ -12,7 +12,7 @@ use domain::environment::{Environment, EnvironmentStore};
 use domain::graphql::GraphqlBody;
 use domain::history::HistoryStore;
 use domain::http::{Body, HttpSender, Method};
-use domain::import::ImportedCollection;
+use domain::import::{ExportReport, ImportedCollection};
 use domain::session::SessionStore;
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -34,11 +34,15 @@ pub struct Deps {
     pub pretty_json: fn(&str) -> Option<String>,
     /// sync file dialog, starting in the collection folder
     pub pick_file: fn(&Path) -> Option<PathBuf>,
-    /// `data::postman::read`
-    pub read_postman: fn(&Path) -> Result<ImportedCollection, AppError>,
+    /// `data::import_file::read`: Postman, OpenAPI or Insomnia
+    pub read_import: fn(&Path) -> Result<ImportedCollection, AppError>,
     /// sync dialogs; None = cancelled
-    pub pick_json: fn() -> Option<PathBuf>,
+    pub pick_import: fn() -> Option<PathBuf>,
     pub pick_dir: fn() -> Option<PathBuf>,
+    /// `data::postman_export::write(root, dest)`
+    pub export_postman: fn(&Path, &Path) -> Result<ExportReport, AppError>,
+    /// save dialog offering a file name; None = cancelled
+    pub pick_save: fn(&str) -> Option<PathBuf>,
     pub graphql_parse: fn(&str) -> Option<GraphqlBody>,
     pub graphql_json: fn(&GraphqlBody) -> Result<String, AppError>,
 }
@@ -149,6 +153,7 @@ impl WorkspaceController {
         s.set_save_as_error("".into());
         s.set_import_open(false);
         s.set_import_name("".into());
+        s.set_import_title("".into());
         s.set_import_counts("".into());
         s.set_import_warnings(ModelRc::default());
         s.set_import_error("".into());
@@ -256,6 +261,7 @@ impl WorkspaceController {
             }
         });
         s.on_collection_settings(on_index(Self::collection_settings));
+        s.on_export_collection(on_index(Self::export_collection));
         s.on_close_collection(on_index(|c, i| {
             if let Some(root) = c.collection_row(i) {
                 c.close_collection(&root);

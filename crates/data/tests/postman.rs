@@ -1,7 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
 
-use data::postman::read;
+use data::import_file::read;
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::Protocol;
@@ -280,32 +279,6 @@ fn warnings_are_one_per_occurrence() {
         .filter(|w| **w == ImportWarning::UnsupportedAuth("oauth2".into()))
         .count();
     assert_eq!(n, 2);
-}
-
-#[test]
-fn not_postman_is_an_error() {
-    assert!(matches!(
-        import(json!({ "openapi": "3.0.0" })),
-        Err(AppError::Import(_))
-    ));
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("x.json");
-    fs::write(&path, "not json").unwrap();
-    assert!(matches!(read(&path), Err(AppError::Import(_))));
-    assert!(matches!(
-        read(&PathBuf::from("/nope/x.json")),
-        Err(AppError::Storage(_))
-    ));
-}
-
-#[test]
-fn huge_file_is_refused_before_reading() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("big.json");
-    let f = fs::File::create(&path).unwrap();
-    // sparse: no 50 MB written to disk
-    f.set_len(50 * 1024 * 1024 + 1).unwrap();
-    assert!(matches!(read(&path), Err(AppError::Import(_))));
 }
 
 #[test]

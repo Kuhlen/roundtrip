@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use domain::AppError;
 use domain::http::Request;
-use domain::import::{ImportItem, ImportWarning, ImportedCollection, ImportedRequest};
+use domain::import::{
+    ImportFormat, ImportItem, ImportWarning, ImportedCollection, ImportedRequest,
+};
 use support::{IMPORTED, PICKED_DIR, PICKED_JSON, setup, state, strings, tree_names};
 
 fn shop() -> ImportedCollection {
@@ -44,6 +46,7 @@ fn preview_shows_counts_and_warnings() {
     let s = state(&ui);
     s.invoke_import_collection();
     assert!(s.get_import_open());
+    assert_eq!(s.get_import_title(), "Import Postman collection");
     assert_eq!(s.get_import_name(), "Shop API");
     assert_eq!(
         s.get_import_counts(),
@@ -131,4 +134,17 @@ fn no_file_or_bad_file_opens_no_dialog() {
     assert!(!s.get_import_open());
     assert_eq!(s.get_banner_title(), "Import failed");
     assert_eq!(s.get_banner_hint(), "not a Postman collection");
+}
+
+#[test]
+fn title_names_an_openapi_spec() {
+    let (_f, ui, _c) = setup();
+    let spec = ImportedCollection {
+        format: ImportFormat::OpenApi("3.1.0".into()),
+        ..shop()
+    };
+    picks(Some("/in/petstore.yaml"), None, Ok(spec));
+    let s = state(&ui);
+    s.invoke_import_collection();
+    assert_eq!(s.get_import_title(), "Import OpenAPI 3.1.0 spec");
 }

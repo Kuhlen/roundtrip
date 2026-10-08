@@ -22,13 +22,14 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - History of sent requests in the sidebar: search by URL, method or name, reopen any entry in a scratch tab, clear all. Auth secrets and secret headers are stored as `[REDACTED]`.
 - Paste a cURL command into the URL bar to fill the request.
 - Copy the active request as cURL with a button or Ctrl+Shift+C.
-- Import a Postman v2.0/v2.1 collection as a new ApiArk collection from the sidebar "+" menu.
+- Import a Postman v2.0/v2.1 collection, an OpenAPI 3.x spec or an Insomnia v4/v5 export as a new ApiArk collection from the sidebar "+" menu.
+- Export a collection as a Postman v2.1 file from its right-click menu.
 - Open several collections at once; environments come from the first one (as in ApiArk).
 - Tabs: open, pin, drag to reorder, close (×, middle click, Ctrl+W), Close others / all; open tabs come back on the next start.
 - Ctrl+T opens a scratch request you can send without a collection; Ctrl+S saves it into a collection.
 - Edits are saved automatically one second after the last change.
 - Ctrl+S saves immediately; ● marks a tab with edits not saved yet.
-- "+" in the sidebar creates a request or folder at the root of the first collection, or imports a Postman collection; right-click a row for New request,
+- "+" in the sidebar creates a request or folder at the root of the first collection, or imports a collection or API spec; right-click a row for New request,
   New folder, Rename (F2) and Delete (Del). Delete is permanent.
 - ApiArk content Roundtrip can't edit (other auth types, other body types, a Bruno or HAR import)
   is kept on save but blocks Send. Invalid GraphQL Variables block Send and Save.

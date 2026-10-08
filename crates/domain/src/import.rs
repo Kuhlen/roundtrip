@@ -7,6 +7,8 @@ use crate::http::Request;
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ImportedCollection {
     pub name: String,
+    /// names the source in the dialog title
+    pub format: ImportFormat,
     /// becomes `defaults.auth`
     pub auth: Option<Auth>,
     pub items: Vec<ImportItem>,
@@ -56,6 +58,43 @@ pub enum ImportWarning {
     UnknownMethod(String),
     /// body mode name; sent without body
     UnsupportedBody(String),
+    /// "gRPC", "WebSocket"; the request is skipped
+    UnsupportedRequest(String),
+    /// Insomnia `{% … %}` left as text
+    TemplateTags,
+    /// `$ref` into another file; left empty
+    ExternalRef,
+    CookieParams,
+    FolderVariables,
+    /// workspaces after the first, not imported
+    OtherWorkspaces(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ImportFormat {
+    #[default]
+    Postman,
+    /// `openapi` field as the file writes it, e.g. "3.1.0"
+    OpenApi(String),
+    Insomnia,
+}
+
+/// What an export wrote and what it left out.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExportReport {
+    pub requests: usize,
+    /// one per kind, only kinds that happened
+    pub warnings: Vec<ExportWarning>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportWarning {
+    /// websocket, sse, grpc files
+    SkippedProtocol(usize),
+    Unreadable(usize),
+    UnsupportedBody(usize),
+    UnsupportedAuth(usize),
+    EnvironmentsNotExported(usize),
 }
 
 impl ImportedCollection {

@@ -1,18 +1,20 @@
-//! Pick a Postman file, preview it, write it under a picked folder, open it.
+//! Pick a collection or spec file, preview it, write it under a picked folder, open it.
 
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::modules::workspace::workspace_controller::WorkspaceController;
-use crate::modules::workspace::workspace_rules::{error_text, import_counts, import_warnings};
+use crate::modules::workspace::workspace_rules::{
+    error_text, import_counts, import_title, import_warnings,
+};
 use crate::ui::WorkspaceState;
 
 impl WorkspaceController {
     pub(crate) fn import_collection(&self) {
         self.flush();
-        let Some(file) = (self.deps.pick_json)() else {
+        let Some(file) = (self.deps.pick_import)() else {
             return;
         };
-        let data = match (self.deps.read_postman)(&file) {
+        let data = match (self.deps.read_import)(&file) {
             Ok(data) => data,
             Err(e) => {
                 self.banner(&e);
@@ -26,6 +28,7 @@ impl WorkspaceController {
             .map(SharedString::from)
             .collect();
         s.set_import_name(data.name.as_str().into());
+        s.set_import_title(import_title(&data.format).into());
         s.set_import_counts(import_counts(data.counts()).into());
         s.set_import_warnings(ModelRc::new(VecModel::from(lines)));
         s.set_import_error("".into());

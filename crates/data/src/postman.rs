@@ -1,33 +1,20 @@
 //! Postman collection v2.0 / v2.1 → ImportedCollection.
 
-use std::fs;
-use std::path::Path;
-
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::Protocol;
 use domain::graphql::GraphqlBody;
 use domain::http::{Body, FormField, KeyValue, Method, Request, TextKind};
-use domain::import::{ImportItem, ImportWarning, ImportedCollection, ImportedRequest};
+use domain::import::{
+    ImportFormat, ImportItem, ImportWarning, ImportedCollection, ImportedRequest,
+};
 use serde_json::Value;
 
-use crate::storage;
-
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+use crate::json_text as text;
 
 type Warnings = Vec<ImportWarning>;
 
-pub fn read(path: &Path) -> Result<ImportedCollection, AppError> {
-    let size = fs::metadata(path).map_err(|e| storage(path, e))?.len();
-    if size > MAX_BYTES {
-        return Err(AppError::Import(format!(
-            "{} is larger than 50 MB",
-            path.display()
-        )));
-    }
-    let content = fs::read_to_string(path).map_err(|e| storage(path, e))?;
-    let root: Value =
-        serde_json::from_str(&content).map_err(|e| AppError::Import(format!("not JSON: {e}")))?;
+pub(crate) fn from_value(root: &Value) -> Result<ImportedCollection, AppError> {
     let (Some(info), Some(items)) = (root.get("info"), root.get("item").and_then(Value::as_array))
     else {
         return Err(AppError::Import("not a Postman collection".into()));
@@ -55,6 +42,7 @@ pub fn read(path: &Path) -> Result<ImportedCollection, AppError> {
         } else {
             name
         },
+        format: ImportFormat::Postman,
         auth,
         items,
         environments,
@@ -381,13 +369,4 @@ fn description(v: Option<&Value>) -> Option<String> {
         o => text(o, "content"),
     };
     (!d.trim().is_empty()).then_some(d)
-}
-
-/// String field; numbers and bools as written, missing or null = "".
-fn text(v: &Value, key: &str) -> String {
-    match v.get(key) {
-        Some(Value::String(s)) => s.clone(),
-        None | Some(Value::Null) => String::new(),
-        Some(other) => other.to_string(),
-    }
 }
