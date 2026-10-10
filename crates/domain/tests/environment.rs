@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use domain::AppError;
-use domain::environment::{Environment, Scope, Variable, resolve, validate};
+use domain::environment::{Environment, Scope, Variable, clean_variables, resolve, validate};
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -84,6 +84,20 @@ fn validate_rejects_duplicate_key() {
             env("dev", Scope::Shared, vec![var("a", "1"), var("a", "2")]),
             &[]
         ),
+        Err(AppError::DuplicateKey("a".into()))
+    );
+}
+
+#[test]
+fn clean_variables_trims_keys_and_drops_blank_ones() {
+    let got = clean_variables(vec![var(" a ", "1"), var("  ", "x"), var("b", "2")]).unwrap();
+    assert_eq!(got, [var("a", "1"), var("b", "2")]);
+}
+
+#[test]
+fn clean_variables_rejects_a_key_repeated_after_trimming() {
+    assert_eq!(
+        clean_variables(vec![var("a", "1"), var(" a", "2")]),
         Err(AppError::DuplicateKey("a".into()))
     );
 }

@@ -1,10 +1,9 @@
-//! Environment picker in the sidebar and the environment editor dialog.
+//! Environment editor dialog.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use domain::environment::{self, Environment, Scope, Variable};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use super::environment_rules::{error_text, shared_secret_notes, unique_name};
 use crate::modules::workspace::request::{grow_rows, placeholder, remove_row};
@@ -16,6 +15,8 @@ pub(crate) struct EnvEditor {
     root: PathBuf,
     /// stored environments, `list` order
     saved: Vec<Environment>,
+    /// root .env as stored
+    dotenv: Vec<Variable>,
     selected: Selected,
     /// what the unsaved-changes answer continues with
     leave: Option<Leave>,
@@ -24,12 +25,14 @@ pub(crate) struct EnvEditor {
 #[derive(Clone)]
 enum Selected {
     None,
+    /// the root .env row
+    Dotenv,
     Saved(usize),
     /// not on disk yet; shown last in the list
     Draft {
         env: Environment,
-        /// `saved` index Cancel returns to; `saved` is fixed while a draft exists
-        back: Option<usize>,
+        /// what Cancel returns to; never a draft
+        back: Box<Selected>,
     },
 }
 
@@ -38,72 +41,22 @@ enum Leave {
     Select(String, Scope),
     New,
     Duplicate,
+    Dotenv,
     Close,
 }
 
 impl WorkspaceController {
-    pub(crate) fn load_environments(&self, preferred: Option<&str>) {
-        let Some(root) = self.env_root() else { return };
-        let envs = self.deps.environments.list(&root).unwrap_or_else(|e| {
-            self.banner(&e);
-            Vec::new()
-        });
-        let names: Vec<SharedString> = std::iter::once("No environment".into())
-            .chain(envs.iter().map(|e| match e.scope {
-                Scope::Shared => e.name.as_str().into(),
-                Scope::Personal => format!("{} (personal)", e.name).into(),
-            }))
-            .collect();
-        let index = preferred
-            .and_then(|p| envs.iter().position(|e| e.name == p))
-            .map_or(0, |i| i + 1);
-        let ui = self.ui();
-        let s = ui.global::<WorkspaceState>();
-        s.set_environments(ModelRc::new(VecModel::from(names)));
-        s.set_environment_index(index as i32);
-        *self.envs.borrow_mut() = envs;
-        self.refresh_vars();
-    }
-
-    pub(crate) fn active_environment(&self) -> Option<String> {
-        let index = self.ui().global::<WorkspaceState>().get_environment_index();
-        let i = usize::try_from(index).ok()?.checked_sub(1)?;
-        self.envs.borrow().get(i).map(|e| e.name.clone())
-    }
-
-    pub(crate) fn environment_selected(&self) {
-        self.refresh_vars();
-        self.save_session();
-        self.changed();
-    }
-
-    pub(crate) fn refresh_vars(&self) {
-        let vars = match (self.env_root(), self.active_environment()) {
-            (Some(root), Some(name)) => self
-                .deps
-                .environments
-                .resolve(&root, &name)
-                .unwrap_or_else(|e| {
-                    self.banner(&e);
-                    HashMap::new()
-                }),
-            _ => HashMap::new(),
-        };
-        *self.vars.borrow_mut() = vars;
-    }
-
-    pub(crate) fn lookup(&self, name: &str) -> Option<String> {
-        self.vars
-            .borrow()
-            .get(name)
-            .cloned()
-            .or_else(|| (self.deps.dynamic_var)(name))
-    }
-
     pub(crate) fn open_environments(&self) {
         let Some(root) = self.env_root() else { return };
         let saved = match self.deps.environments.list(&root) {
             Ok(saved) => saved,
+            Err(e) => {
+                self.banner(&e);
+                return;
+            }
+        };
+        let dotenv = match self.deps.environments.root_dotenv(&root) {
+            Ok(dotenv) => dotenv,
             Err(e) => {
                 self.banner(&e);
                 return;
@@ -123,6 +76,7 @@ impl WorkspaceController {
         *self.env_editor.borrow_mut() = Some(EnvEditor {
             root,
             saved,
+            dotenv,
             selected,
             leave: None,
         });
@@ -136,19 +90,20 @@ impl WorkspaceController {
 
     /// List + form from the editor state; unsaved edits are dropped.
     fn show_env_form(&self) {
-        let (list, index, env) = {
+        let (list, index, env, on_dotenv) = {
             let editor = self.env_editor.borrow();
             let Some(ed) = editor.as_ref() else { return };
             let mut list: Vec<EnvListRow> = ed.saved.iter().map(|e| list_row(e, false)).collect();
             let (index, env) = match &ed.selected {
                 Selected::None => (-1, None),
+                Selected::Dotenv => (-1, Some(dotenv_env(&ed.dotenv))),
                 Selected::Saved(i) => (*i as i32, ed.saved.get(*i).cloned()),
                 Selected::Draft { env, .. } => {
                     list.push(list_row(env, true));
                     (list.len() as i32 - 1, Some(env.clone()))
                 }
             };
-            (list, index, env)
+            (list, index, env, matches!(ed.selected, Selected::Dotenv))
         };
         let env = env.unwrap_or_else(|| Environment {
             name: String::new(),
@@ -159,6 +114,7 @@ impl WorkspaceController {
         let s = ui.global::<WorkspaceState>();
         s.set_env_list(ModelRc::new(VecModel::from(list)));
         s.set_env_index(index);
+        s.set_env_on_dotenv(on_dotenv);
         s.set_env_name(env.name.as_str().into());
         s.set_env_scope_index(i32::from(env.scope == Scope::Personal));
         self.env_rows.set_vec(
@@ -202,6 +158,7 @@ impl WorkspaceController {
         let ed = editor.as_ref()?;
         match &ed.selected {
             Selected::None => None,
+            Selected::Dotenv => Some((Some(dotenv_env(&ed.dotenv)), Vec::new())),
             Selected::Draft { .. } => Some((None, ed.saved.clone())),
             Selected::Saved(i) => {
                 let mut others = ed.saved.clone();
@@ -254,6 +211,13 @@ impl WorkspaceController {
         }
     }
 
+    pub(crate) fn env_dotenv_selected(&self) {
+        if self.ui().global::<WorkspaceState>().get_env_on_dotenv() {
+            return;
+        }
+        self.env_leave(Leave::Dotenv);
+    }
+
     pub(crate) fn env_new(&self) {
         self.env_leave(Leave::New);
     }
@@ -278,7 +242,12 @@ impl WorkspaceController {
             ed.leave = Some(leave);
         }
         s.set_dialog_kind(DialogKind::EnvironmentUnsaved);
-        s.set_confirm_name(s.get_env_name());
+        let name = if s.get_env_on_dotenv() {
+            ".env".into()
+        } else {
+            s.get_env_name()
+        };
+        s.set_confirm_name(name);
         s.set_confirm_open(true);
     }
 
@@ -290,24 +259,24 @@ impl WorkspaceController {
         }
         if let Some(ed) = self.env_editor.borrow_mut().as_mut() {
             let taken: Vec<&str> = ed.saved.iter().map(|e| e.name.as_str()).collect();
-            let back = match &ed.selected {
-                Selected::None => None,
-                Selected::Saved(i) => Some(*i),
-                Selected::Draft { back, .. } => *back,
-            };
+            let back = Box::new(match &ed.selected {
+                Selected::Draft { back, .. } => (**back).clone(),
+                other => other.clone(),
+            });
             let next = match leave {
                 Leave::Select(name, scope) => ed
                     .saved
                     .iter()
                     .position(|e| e.name == name && e.scope == scope)
                     .map_or(Selected::None, Selected::Saved),
+                Leave::Dotenv => Selected::Dotenv,
                 Leave::New => Selected::Draft {
                     env: Environment {
                         name: unique_name("New environment", &taken),
                         scope: Scope::Shared,
                         variables: Vec::new(),
                     },
-                    back,
+                    back: back.clone(),
                 },
                 Leave::Duplicate => match &ed.selected {
                     Selected::Saved(i) => {
@@ -332,15 +301,19 @@ impl WorkspaceController {
 
     pub(crate) fn env_cancel(&self) {
         if let Some(ed) = self.env_editor.borrow_mut().as_mut()
-            && let Selected::Draft { back, .. } = ed.selected
+            && let Selected::Draft { back, .. } = &ed.selected
         {
-            ed.selected = back.map_or(Selected::None, Selected::Saved);
+            let back = (**back).clone();
+            ed.selected = back;
         }
         self.show_env_form();
     }
 
     /// false when not written; the dialog shows why.
     pub(crate) fn env_save(&self) -> bool {
+        if self.on_dotenv() {
+            return self.dotenv_save();
+        }
         let Some((saved, others)) = self.env_baseline() else {
             return false;
         };
@@ -369,7 +342,43 @@ impl WorkspaceController {
         true
     }
 
+    fn on_dotenv(&self) -> bool {
+        self.env_editor
+            .borrow()
+            .as_ref()
+            .is_some_and(|ed| matches!(ed.selected, Selected::Dotenv))
+    }
+
+    fn dotenv_save(&self) -> bool {
+        let Some(root) = self.env_editor.borrow().as_ref().map(|ed| ed.root.clone()) else {
+            return false;
+        };
+        let result = environment::clean_variables(self.env_form().variables)
+            .and_then(|vars| self.deps.environments.save_root_dotenv(&root, &vars))
+            .and_then(|()| self.deps.environments.root_dotenv(&root));
+        match result {
+            Ok(dotenv) => {
+                if let Some(ed) = self.env_editor.borrow_mut().as_mut() {
+                    ed.dotenv = dotenv;
+                }
+                self.show_env_form();
+                self.refresh_vars();
+                self.changed();
+                true
+            }
+            Err(e) => {
+                self.ui()
+                    .global::<WorkspaceState>()
+                    .set_env_error(error_text(&e).into());
+                false
+            }
+        }
+    }
+
     pub(crate) fn env_delete(&self) {
+        if self.on_dotenv() {
+            return;
+        }
         let Some((Some(env), _)) = self.env_baseline() else {
             return;
         };
@@ -382,6 +391,9 @@ impl WorkspaceController {
 
     pub(crate) fn confirm_env_delete(&self) {
         self.close_dialog();
+        if self.on_dotenv() {
+            return;
+        }
         let Some((Some(env), _)) = self.env_baseline() else {
             return;
         };
@@ -450,6 +462,14 @@ impl WorkspaceController {
         self.load_environments(active);
         self.save_session();
         self.changed();
+    }
+}
+
+fn dotenv_env(variables: &[Variable]) -> Environment {
+    Environment {
+        name: String::new(),
+        scope: Scope::Shared,
+        variables: variables.to_vec(),
     }
 }
 

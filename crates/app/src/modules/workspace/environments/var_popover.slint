@@ -1,0 +1,92 @@
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, VarMode } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+
+// under the clicked {{var}}; transparent scrim closes it
+export component VarPopover inherits Rectangle {
+    property <bool> editable: WorkspaceState.var-mode == VarMode.edit || WorkspaceState.var-mode == VarMode.secret;
+    property <bool> revealed;
+    TouchArea {
+        clicked => { WorkspaceState.var-close(); }
+    }
+    keys := FocusScope {
+        // else first outside click only moves focus here
+        focus-on-click: false;
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                WorkspaceState.var-close();
+                return accept;
+            }
+            reject
+        }
+        card := Rectangle {
+            width: 300px;
+            height: body.preferred-height;
+            x: max(8px, min(WorkspaceState.var-x - root.absolute-position.x, root.width - self.width - 8px));
+            y: WorkspaceState.var-y - root.absolute-position.y + 4px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.line;
+            border-radius: 8px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000080;
+            // card swallows clicks: only the scrim closes
+            TouchArea { }
+            body := VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text { text: WorkspaceState.var-name; font-family: Theme.mono; font-weight: 600; color: Theme.text; }
+                if root.editable: HorizontalLayout {
+                    spacing: 6px;
+                    value := Field {
+                        horizontal-stretch: 1;
+                        text <=> WorkspaceState.var-value;
+                        input-type: WorkspaceState.var-mode == VarMode.secret && !root.revealed ? InputType.password : InputType.text;
+                        accepted => { WorkspaceState.var-save(); }
+                        init => {
+                            self.focus();
+                            self.select-all();
+                        }
+                    }
+                    if WorkspaceState.var-mode == VarMode.secret: Btn {
+                        text: root.revealed ? "Hide" : "Show";
+                        ghost: true;
+                        small: true;
+                        clicked => { root.revealed = !root.revealed; }
+                    }
+                    Btn {
+                        text: "Save";
+                        primary: true;
+                        small: true;
+                        clicked => { WorkspaceState.var-save(); }
+                    }
+                }
+                if root.editable: Text {
+                    text: "Saves to " + WorkspaceState.var-env;
+                    font-size: 12px;
+                    color: Theme.muted;
+                }
+                if !root.editable: Text {
+                    text: WorkspaceState.var-mode == VarMode.dynamic ? "Generated on each send"
+                        : WorkspaceState.var-mode == VarMode.no-environment ? "Select an environment first"
+                        : "Open a collection first";
+                    color: Theme.muted;
+                }
+                if WorkspaceState.var-error != "": Text {
+                    text: WorkspaceState.var-error;
+                    color: Theme.err;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+    init => {
+        if !root.editable {
+            keys.focus();
+        }
+    }
+}

@@ -435,3 +435,92 @@ fn in_place_edit_keeps_a_name_that_is_no_file_stem() {
     let envs = EnvironmentDir.list(r).unwrap();
     assert_eq!(envs[0].variables, [var("a", "1", false)]);
 }
+
+fn plain(key: &str, value: &str) -> Variable {
+    var(key, value, false)
+}
+
+#[test]
+fn root_dotenv_lists_in_file_order_and_last_value_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    write(r, ".env", "# c\nb=1\na = '2'\nb=3\nnoequals\n");
+    assert_eq!(
+        EnvironmentDir.root_dotenv(r).unwrap(),
+        [plain("b", "3"), plain("a", "2")]
+    );
+}
+
+#[test]
+fn root_dotenv_missing_file_is_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(EnvironmentDir.root_dotenv(dir.path()).unwrap().is_empty());
+}
+
+#[test]
+fn save_root_dotenv_keeps_comments_and_crlf() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    write(r, ".env", "# top\r\na=1\r\n\r\nb=2\r\n");
+    EnvironmentDir
+        .save_root_dotenv(r, &[plain("a", "9"), plain("c", " spaced ")])
+        .unwrap();
+    assert_eq!(read(r, ".env"), "# top\r\na=9\r\n\r\nc=\" spaced \"\r\n");
+    assert_eq!(read(r, ".gitignore"), ".env\n");
+}
+
+#[test]
+fn save_root_dotenv_collapses_duplicates() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    write(r, ".env", "a=1\nx=keep\na=2\n");
+    EnvironmentDir
+        .save_root_dotenv(r, &[plain("a", "5"), plain("x", "keep")])
+        .unwrap();
+    assert_eq!(read(r, ".env"), "a=5\nx=keep\n");
+}
+
+#[test]
+fn save_root_dotenv_adds_env_to_gitignore_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    write(r, ".gitignore", "target");
+    EnvironmentDir
+        .save_root_dotenv(r, &[plain("a", "1")])
+        .unwrap();
+    EnvironmentDir
+        .save_root_dotenv(r, &[plain("a", "2")])
+        .unwrap();
+    assert_eq!(read(r, ".gitignore"), "target\n.env\n");
+}
+
+#[test]
+fn save_root_dotenv_without_changes_writes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    EnvironmentDir.save_root_dotenv(r, &[]).unwrap();
+    assert!(!r.join(".env").exists());
+    assert!(!r.join(".gitignore").exists());
+}
+
+#[test]
+fn save_root_dotenv_rejects_unsafe_entries_before_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = dir.path();
+    for bad in [plain("a", "x\ny"), plain("a=b", "1"), plain("#a", "1")] {
+        assert!(matches!(
+            EnvironmentDir.save_root_dotenv(r, &[bad]),
+            Err(AppError::Storage(_))
+        ));
+    }
+    assert!(!r.join(".env").exists());
+}
+
+#[test]
+fn save_root_dotenv_rejects_duplicate_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        EnvironmentDir.save_root_dotenv(dir.path(), &[plain("a", "1"), plain("a", "2")]),
+        Err(AppError::DuplicateKey("a".into()))
+    );
+}

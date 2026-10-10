@@ -13,7 +13,9 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - Edit environments with the pencil button next to the environment picker: create, duplicate, rename, delete, move
   between Shared and Personal (`.apiark/environments.local/`, gitignored). A Secret variable keeps
   its value in `.apiark/.env` (gitignored, masked in the table) instead of the YAML file.
+- The same dialog edits the collection's root `.env` (the pinned `.env` row): values every environment shares, overridden by environment variables. Comments in the file are kept.
 - Edit method, URL, params, headers; `{{var}}` and `{{$uuid}}`-style variables.
+- Variables in the URL are coloured when the field is not focused (set, not set, generated). Click one to set its value in the active environment.
 - Bodies: JSON, XML, raw, urlencoded and form-data (a table; form-data rows can be files), binary
   (a file), and GraphQL (Query, Variables, Operation name). `…` / "Choose file…" store a path
   relative to the collection when the file is inside it; `{{var}}` works in paths.
@@ -51,7 +53,8 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - A reopened history entry carries the auth its collection had at send time (secrets redacted), not Inherit.
 - A secret key has one value per collection: environments that both mark `token` secret share it.
 - Once saved, secret variables are listed after the others.
-- The root `.env` file is not editable in the app.
+- Only the URL highlights variables; params, headers and bodies don't.
+- Root `.env` values resolve only while an environment is selected.
 
 ## Build
 

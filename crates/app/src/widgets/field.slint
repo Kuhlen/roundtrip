@@ -9,6 +9,10 @@ export component Field inherits Rectangle {
     // disabled key/value row; Text has no strikethrough, so draw one
     in property <bool> struck;
     in property <InputType> input-type <=> input.input-type;
+    // URL overlay draws the text instead; cursor and selection stay
+    in property <bool> hide-text;
+    // where the text starts, scrolled; overlays line up with it
+    out property <length> text-x: root.pad + input.x;
     callback edited();
     callback accepted();
     out property <bool> has-focus: input.has-focus;
@@ -51,7 +55,7 @@ export component Field inherits Rectangle {
             vertical-alignment: center;
             font-family: Theme.mono;
             font-size: root.framed ? 12.5px : 12px;
-            color: root.struck ? Theme.faint : Theme.text;
+            color: root.hide-text ? transparent : root.struck ? Theme.faint : Theme.text;
             selection-background-color: Theme.accent-soft;
             selection-foreground-color: Theme.text;
             accessible-role: none;

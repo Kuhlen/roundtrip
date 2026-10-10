@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use app::modules::workspace::workspace_rules::{
-    RowKind, error_text, export_lines, flatten, flatten_collections, folder_choices, format_size,
-    import_counts, import_title, import_warnings, inherit_note, interpolate_request, is_curl_paste,
-    resolve_files, resolved_url, row_label, unsupported_body_note,
+    PartKind, RowKind, UrlPart, error_text, export_lines, flatten, flatten_collections,
+    folder_choices, format_size, import_counts, import_title, import_warnings, inherit_note,
+    interpolate_request, is_curl_paste, resolve_files, resolved_url, row_label,
+    unsupported_body_note, url_segments,
 };
 use domain::AppError;
 use domain::auth::{ApiKeyPlace, Auth};
@@ -546,4 +547,70 @@ fn export_lines_count_and_explain() {
     assert_eq!(hint, "2 unsaved requests exported in their saved state");
     let (_, hint) = export_lines(&ExportReport::default(), 1);
     assert_eq!(hint, "1 unsaved request exported in its saved state");
+}
+
+fn part(text: &str, name: &str, kind: PartKind, tip: &str) -> UrlPart {
+    UrlPart {
+        text: text.into(),
+        name: name.into(),
+        kind,
+        tip: tip.into(),
+    }
+}
+
+fn parts(url: &str) -> Vec<UrlPart> {
+    url_segments(
+        url,
+        |n| match n {
+            "host" => Some("h.test".into()),
+            "token" => Some("s3cret".into()),
+            _ => None,
+        },
+        |n| n == "token",
+        |n| n == "$uuid",
+    )
+}
+
+#[test]
+fn url_segments_mark_each_variable_kind() {
+    assert_eq!(
+        parts("{{host}}/{{token}}/{{id}}/{{$uuid}}"),
+        [
+            part("{{host}}", "host", PartKind::Resolved, "host = h.test"),
+            part("/", "", PartKind::Text, ""),
+            part("{{token}}", "token", PartKind::Resolved, "token = ••••"),
+            part("/", "", PartKind::Text, ""),
+            part("{{id}}", "id", PartKind::Unresolved, "id is not set"),
+            part("/", "", PartKind::Text, ""),
+            part(
+                "{{$uuid}}",
+                "$uuid",
+                PartKind::Dynamic,
+                "Generated on each send"
+            ),
+        ]
+    );
+}
+
+#[test]
+fn url_without_variables_has_no_segments() {
+    assert!(parts("https://h.test/x").is_empty());
+}
+
+#[test]
+fn blank_variable_is_plain_text() {
+    assert_eq!(
+        parts("a{{ }}b"),
+        [
+            part("a", "", PartKind::Text, ""),
+            part("{{ }}", "", PartKind::Text, ""),
+            part("b", "", PartKind::Text, ""),
+        ]
+    );
+}
+
+#[test]
+fn environment_value_wins_over_a_dynamic_name() {
+    let got = url_segments("{{$uuid}}", |_| Some("fixed".into()), |_| false, |_| true);
+    assert_eq!(got[0].kind, PartKind::Resolved);
 }

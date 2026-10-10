@@ -381,6 +381,9 @@ pub struct FakeEnvironments {
     pub saves: RefCell<Vec<SavedEnvironment>>,
     pub deletes: RefCell<Vec<(String, Scope)>>,
     pub save_error: RefCell<Option<AppError>>,
+    /// root `.env` of every collection
+    pub dotenv: RefCell<Vec<Variable>>,
+    pub dotenv_saves: RefCell<Vec<Vec<Variable>>>,
 }
 
 fn fake_env(name: &str, scope: Scope, vars: &[(&str, &str, bool)]) -> Environment {
@@ -433,6 +436,12 @@ impl Default for FakeEnvironments {
             saves: RefCell::default(),
             deletes: RefCell::default(),
             save_error: RefCell::default(),
+            dotenv: RefCell::new(vec![Variable {
+                key: "rootOnly".into(),
+                value: "from-dotenv".into(),
+                secret: false,
+            }]),
+            dotenv_saves: RefCell::default(),
         }
     }
 }
@@ -451,11 +460,17 @@ impl EnvironmentStore for FakeEnvironments {
     }
 
     fn resolve(&self, collection: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
+        let root: HashMap<String, String> = self
+            .dotenv
+            .borrow()
+            .iter()
+            .map(|v| (v.key.clone(), v.value.clone()))
+            .collect();
         Ok(self
             .list(collection)?
             .iter()
             .find(|e| e.name == name)
-            .map(|e| domain::environment::resolve(HashMap::new(), e))
+            .map(|e| domain::environment::resolve(root, e))
             .unwrap_or_default())
     }
 
@@ -487,6 +502,19 @@ impl EnvironmentStore for FakeEnvironments {
         if let Some(list) = self.envs.borrow_mut().get_mut(collection) {
             list.retain(|e| !(e.name == name && e.scope == scope));
         }
+        Ok(())
+    }
+
+    fn root_dotenv(&self, _collection: &Path) -> Result<Vec<Variable>, AppError> {
+        Ok(self.dotenv.borrow().clone())
+    }
+
+    fn save_root_dotenv(&self, _collection: &Path, vars: &[Variable]) -> Result<(), AppError> {
+        if let Some(e) = self.save_error.borrow().clone() {
+            return Err(e);
+        }
+        self.dotenv_saves.borrow_mut().push(vars.to_vec());
+        *self.dotenv.borrow_mut() = vars.to_vec();
         Ok(())
     }
 }
@@ -730,7 +758,7 @@ pub fn build_with(
         sender: f.sender.clone(),
         session: f.session.clone(),
         history,
-        dynamic_var: |_| None,
+        dynamic_var: |n| (n == "$uuid").then(|| "uuid-1".to_owned()),
         pretty_json: data::http::pretty_json,
         pick_file: |_| PICKED.with(|p| p.borrow().clone()),
         read_import: |_| IMPORTED.with(|i| i.borrow().clone()),

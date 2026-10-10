@@ -7,6 +7,7 @@ import { BodyEditor } from "body_editor.slint";
 import { Select } from "../../../widgets/select.slint";
 import { Tab } from "../../../widgets/tab.slint";
 import { AuthForm } from "../../../snippets/auth_form.slint";
+import { UrlOverlay } from "url_overlay.slint";
 import { KvTableView } from "../../../snippets/kv_table.slint";
 
 // spans the editor and response columns
@@ -66,12 +67,17 @@ export component RequestHeader inherits Rectangle {
                 enabled: WorkspaceState.has-request;
                 selected => { WorkspaceState.changed(); }
             }
-            Field {
+            url := Field {
                 horizontal-stretch: 1;
                 text <=> WorkspaceState.url;
                 placeholder: "https://";
                 enabled: WorkspaceState.has-request;
+                hide-text: !self.has-focus && WorkspaceState.url-segments.length > 0;
                 edited => { WorkspaceState.url-edited(); }
+                if url.hide-text: UrlOverlay {
+                    x: url.text-x;
+                    height: 100%;
+                }
             }
             Btn {
                 text: root.copied ? "Copied" : "cURL";

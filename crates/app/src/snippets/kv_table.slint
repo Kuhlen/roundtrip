@@ -16,6 +16,8 @@ export component KvTableView inherits Rectangle {
     // environment table: no enabled flag, a Secret/Plain label instead
     in property <bool> secret-column;
     in property <bool> show-secrets;
+    // .env table: no enabled flag and no Secret column
+    in property <bool> always-enabled;
     // ListView's own preferred height is tiny; ask for every row, shrink only when space runs out
     preferred-height: (root.rows.length + 1) * 32px + 2px;
     max-height: self.preferred-height;
@@ -29,7 +31,7 @@ export component KvTableView inherits Rectangle {
             height: 32px;
             background: Theme.surface;
             HorizontalLayout {
-                Rectangle { width: root.secret-column ? 0px : 30px; }
+                Rectangle { width: root.secret-column || root.always-enabled ? 0px : 30px; }
                 // same 10 px inset as the Field cells below
                 HorizontalLayout {
                     horizontal-stretch: 10;
@@ -61,8 +63,8 @@ export component KvTableView inherits Rectangle {
                 }
                 HorizontalLayout {
                     Rectangle {
-                        width: root.secret-column ? 0px : 30px;
-                        if !line.is-last && !root.secret-column: Checkbox {
+                        width: root.secret-column || root.always-enabled ? 0px : 30px;
+                        if !line.is-last && !root.secret-column && !root.always-enabled: Checkbox {
                             x: 8px;
                             y: 9px;
                             checked <=> row.enabled;

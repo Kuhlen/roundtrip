@@ -1,0 +1,31 @@
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState, SegmentKind } from "../workspace_state.slint";
+
+// text segments take no clicks: they fall through to the TextInput below
+export component UrlOverlay inherits HorizontalLayout {
+    for seg in WorkspaceState.url-segments: Rectangle {
+        width: label.preferred-width;
+        label := Text {
+            text: seg.text;
+            font-family: Theme.mono;
+            // Field's framed size
+            font-size: 12.5px;
+            vertical-alignment: center;
+            color: seg.kind == SegmentKind.resolved ? Theme.accent
+                : seg.kind == SegmentKind.unresolved ? Theme.warn
+                : seg.kind == SegmentKind.dynamic ? Theme.dynamic
+                : Theme.text;
+        }
+        if seg.kind != SegmentKind.text: TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                WorkspaceState.var-x = self.absolute-position.x;
+                WorkspaceState.var-y = self.absolute-position.y + self.height;
+                WorkspaceState.var-clicked(seg.name);
+            }
+            Tooltip {
+                text: @markdown("\{seg.tip}");
+            }
+        }
+    }
+}

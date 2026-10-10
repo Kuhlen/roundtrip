@@ -52,6 +52,21 @@ export component EnvironmentDialog inherits Rectangle {
                         width: 220px;
                         spacing: 8px;
                         Rectangle {
+                            height: 40px;
+                            border-radius: 6px;
+                            background: WorkspaceState.env-on-dotenv ? Theme.accent-soft : dotenv-touch.has-hover ? Theme.raised : transparent;
+                            VerticalLayout {
+                                padding-left: 10px;
+                                alignment: center;
+                                Text { text: ".env"; font-family: Theme.mono; color: Theme.text; }
+                                Text { text: "all environments"; font-size: 11px; color: Theme.muted; }
+                            }
+                            dotenv-touch := TouchArea {
+                                clicked => { WorkspaceState.env-dotenv-selected(); }
+                            }
+                        }
+                        Rectangle { height: 1px; background: Theme.line-soft; }
+                        Rectangle {
                             vertical-stretch: 1;
                             border-width: 1px;
                             border-color: Theme.line-soft;
@@ -99,13 +114,37 @@ export component EnvironmentDialog inherits Rectangle {
                             }
                         }
                     }
-                    if !root.selected: VerticalLayout {
+                    if !root.selected && !WorkspaceState.env-on-dotenv: VerticalLayout {
                         horizontal-stretch: 1;
                         alignment: center;
                         Text {
                             text: "No environments yet. Create one with + New.";
                             color: Theme.muted;
                             horizontal-alignment: center;
+                        }
+                    }
+                    if WorkspaceState.env-on-dotenv: VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: start;
+                        spacing: 10px;
+                        Text { text: "VARIABLES"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; }
+                        KvTableView {
+                            vertical-stretch: 1;
+                            rows: WorkspaceState.env-rows;
+                            always-enabled: true;
+                            edited(i) => { WorkspaceState.env-edited(i); }
+                            removed(i) => { WorkspaceState.env-removed(i); }
+                        }
+                        Text {
+                            text: "Shared by every environment; environment variables override it.";
+                            font-size: 12px;
+                            color: Theme.muted;
+                            wrap: word-wrap;
+                        }
+                        if WorkspaceState.env-error != "": Text {
+                            text: WorkspaceState.env-error;
+                            color: Theme.err;
+                            wrap: word-wrap;
                         }
                     }
                     if root.selected: VerticalLayout {

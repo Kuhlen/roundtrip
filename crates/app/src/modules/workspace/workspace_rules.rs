@@ -8,7 +8,7 @@ use domain::auth::{ApiKeyPlace, Auth};
 use domain::collection::{Collection, Node, Protocol};
 use domain::http::{Body, FormField, KeyValue, Method, Request};
 use domain::import::{ExportReport, ExportWarning, ImportFormat, ImportWarning};
-use domain::interpolation::interpolate;
+use domain::interpolation::{Segment, interpolate, segments};
 
 pub use domain::http::resolve_files;
 
@@ -148,6 +148,67 @@ pub fn resolved_url(request: &Request, lookup: impl Fn(&str) -> Option<String>) 
         url.push_str(&query.join("&"));
     }
     url
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartKind {
+    Text,
+    Resolved,
+    Unresolved,
+    Dynamic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UrlPart {
+    pub text: String,
+    /// lookup name; "" for text
+    pub name: String,
+    pub kind: PartKind,
+    /// hover text
+    pub tip: String,
+}
+
+/// URL overlay pieces; empty when nothing to highlight. Same precedence as Send:
+/// environment value, then dynamic generator.
+pub fn url_segments(
+    url: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+    is_secret: impl Fn(&str) -> bool,
+    is_dynamic: impl Fn(&str) -> bool,
+) -> Vec<UrlPart> {
+    let all = segments(url);
+    if !all.iter().any(|s| matches!(s, Segment::Var { .. })) {
+        return Vec::new();
+    }
+    let text = |t: String| UrlPart {
+        text: t,
+        name: String::new(),
+        kind: PartKind::Text,
+        tip: String::new(),
+    };
+    all.into_iter()
+        .map(|s| match s {
+            Segment::Text(t) => text(t),
+            // nothing to save under an empty key
+            Segment::Var { name, raw } if name.is_empty() => text(raw),
+            Segment::Var { name, raw } => {
+                let (kind, tip) = match lookup(&name) {
+                    Some(_) if is_secret(&name) => (PartKind::Resolved, format!("{name} = ••••")),
+                    Some(value) => (PartKind::Resolved, format!("{name} = {value}")),
+                    None if is_dynamic(&name) => {
+                        (PartKind::Dynamic, "Generated on each send".to_owned())
+                    }
+                    None => (PartKind::Unresolved, format!("{name} is not set")),
+                };
+                UrlPart {
+                    text: raw,
+                    name,
+                    kind,
+                    tip,
+                }
+            }
+        })
+        .collect()
 }
 
 pub fn auth_label(auth: &Auth) -> String {

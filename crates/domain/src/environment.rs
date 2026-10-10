@@ -38,6 +38,19 @@ pub fn resolve(root_dotenv: HashMap<String, String>, env: &Environment) -> HashM
     vars
 }
 
+/// Keys trimmed, blank-key rows dropped; a key may appear once.
+pub fn clean_variables(mut vars: Vec<Variable>) -> Result<Vec<Variable>, AppError> {
+    for v in &mut vars {
+        v.key = v.key.trim().to_owned();
+    }
+    vars.retain(|v| !v.key.is_empty());
+    let mut seen = HashSet::new();
+    if let Some(v) = vars.iter().find(|v| !seen.insert(v.key.as_str())) {
+        return Err(AppError::DuplicateKey(v.key.clone()));
+    }
+    Ok(vars)
+}
+
 /// Ready to store: name trimmed, blank-key rows dropped.
 /// `others` = every stored environment except the edited one.
 pub fn validate(mut env: Environment, others: &[Environment]) -> Result<Environment, AppError> {
@@ -49,20 +62,7 @@ pub fn validate(mut env: Environment, others: &[Environment]) -> Result<Environm
     if others.iter().any(|o| o.name == env.name) {
         return Err(AppError::AlreadyExists(env.name));
     }
-    for v in &mut env.variables {
-        v.key = v.key.trim().to_owned();
-    }
-    env.variables.retain(|v| !v.key.is_empty());
-    let dup = {
-        let mut seen = HashSet::new();
-        env.variables
-            .iter()
-            .find(|v| !seen.insert(v.key.as_str()))
-            .map(|v| v.key.clone())
-    };
-    if let Some(key) = dup {
-        return Err(AppError::DuplicateKey(key));
-    }
+    env.variables = clean_variables(std::mem::take(&mut env.variables))?;
     Ok(env)
 }
 
@@ -79,4 +79,8 @@ pub trait EnvironmentStore {
         env: &Environment,
     ) -> Result<(), AppError>;
     fn delete(&self, collection: &Path, name: &str, scope: Scope) -> Result<(), AppError>;
+    /// Collection root `.env`, file order, never secret; missing file = empty.
+    fn root_dotenv(&self, collection: &Path) -> Result<Vec<Variable>, AppError>;
+    /// Comments and foreign lines kept; rows not in `vars` removed.
+    fn save_root_dotenv(&self, collection: &Path, vars: &[Variable]) -> Result<(), AppError>;
 }

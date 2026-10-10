@@ -6,6 +6,9 @@ export enum StatusClass { ok, warn, err }
 export enum KvTable { params, headers, form }
 export enum DialogKind { untitled, delete, clear-history, environment-delete, environment-unsaved }
 // draft: New/Duplicate not saved yet
+export enum SegmentKind { text, resolved, unresolved, dynamic }
+export enum VarMode { edit, secret, dynamic, no-environment, no-collection }
+export struct UrlSegment { text: string, name: string, kind: SegmentKind, tip: string }
 export struct EnvListRow { name: string, personal: bool, draft: bool }
 export struct TabItem { title: string, dirty: bool, pinned: bool, active: bool, untitled: bool }
 // failed: the send ended in an error, status is "—"
@@ -45,6 +48,19 @@ export global WorkspaceState {
     in-out property <int> method-index;
     in-out property <string> url;
     in property <string> resolved-url;
+    // URL overlay; empty = nothing to highlight
+    in property <[UrlSegment]> url-segments;
+    // window position under the clicked variable, set by the overlay
+    in-out property <length> var-x;
+    in-out property <length> var-y;
+    // variable popover
+    in property <bool> var-open;
+    in property <string> var-name;
+    in-out property <string> var-value;
+    in property <VarMode> var-mode;
+    // environment Save writes to
+    in property <string> var-env;
+    in property <string> var-error;
     // last row is always the empty placeholder
     in property <[KvRow]> params;
     in property <[KvRow]> headers;
@@ -140,6 +156,8 @@ export global WorkspaceState {
     in property <[KvRow]> env-rows;
     in-out property <bool> env-show-secrets;
     in property <bool> env-dirty;
+    // the root .env row is selected, not an environment
+    in property <bool> env-on-dotenv;
     in property <[string]> env-notes;
     in property <string> env-error;
 
@@ -151,6 +169,9 @@ export global WorkspaceState {
     callback changed();
     // URL field edit; a pasted curl command fills the request
     callback url-edited();
+    callback var-clicked(string);
+    callback var-save();
+    callback var-close();
     // active request as a curl command; "" = can't, banner says why
     callback curl-command() -> string;
     // -1 = binary path, >= 0 = form row
@@ -208,6 +229,7 @@ export global WorkspaceState {
     // int = env-list index
     callback env-selected(int);
     callback env-new();
+    callback env-dotenv-selected();
     callback env-duplicate();
     callback env-delete();
     callback env-edited(int);

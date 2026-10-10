@@ -9,6 +9,7 @@ pub mod app_state;
 mod body_file;
 pub mod collection_dir;
 mod collection_import;
+mod dotenv;
 pub mod dynamic_vars;
 pub mod environment_dir;
 pub mod graphql;

@@ -9,6 +9,7 @@ import { CollectionSettings } from "sidebar/collection_settings.slint";
 import { TabBar } from "tabs/tab_bar.slint";
 import { SaveAsDialog } from "tabs/save_as_dialog.slint";
 import { ImportDialog } from "import/import_dialog.slint";
+import { VarPopover } from "environments/var_popover.slint";
 import { EnvironmentDialog } from "environments/environment_dialog.slint";
 
 export component WorkspaceView inherits Rectangle {
@@ -106,10 +107,11 @@ export component WorkspaceView inherits Rectangle {
     if WorkspaceState.save-as-open: SaveAsDialog { }
     if WorkspaceState.import-open: ImportDialog { }
     if WorkspaceState.envs-open: EnvironmentDialog { }
+    if WorkspaceState.var-open: VarPopover { }
     // last: asks on top of the environment dialog
     if WorkspaceState.confirm-open: ConfirmDialog { }
     // dialog focus is lost when it closes; shortcuts need keys back
-    property <bool> dialog-open: WorkspaceState.confirm-open || WorkspaceState.settings-open || WorkspaceState.save-as-open || WorkspaceState.import-open || WorkspaceState.envs-open;
+    property <bool> dialog-open: WorkspaceState.confirm-open || WorkspaceState.settings-open || WorkspaceState.save-as-open || WorkspaceState.import-open || WorkspaceState.envs-open || WorkspaceState.var-open;
     changed dialog-open => {
         if !self.dialog-open {
             keys.focus();

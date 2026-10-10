@@ -3,7 +3,7 @@
 use domain::auth::effective;
 use domain::collection::Protocol;
 use domain::http::{Body, KeyValue, Method, Request, TextKind};
-use slint::{ComponentHandle, Model, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use super::body_fields::body_count;
 use crate::modules::workspace::auth_fields::{auth_fields, auth_from_fields};
@@ -24,6 +24,7 @@ impl WorkspaceController {
         s.set_method_index(0);
         s.set_url("".into());
         s.set_resolved_url("".into());
+        s.set_url_segments(ModelRc::default());
         self.fill_body(s, &Body::None, None);
         s.set_body_count(0);
         s.set_unsupported_protocol("".into());
@@ -147,6 +148,7 @@ impl WorkspaceController {
         });
         let Some((form, dirty, error)) = current else {
             s.set_resolved_url("".into());
+            s.set_url_segments(ModelRc::default());
             return;
         };
         let flipped = self
@@ -172,6 +174,7 @@ impl WorkspaceController {
         let out = self.outgoing(form);
         s.set_auth_blocked(out.auth.as_ref().is_some_and(|a| !a.is_sendable()));
         s.set_resolved_url(workspace_rules::resolved_url(&out, |n| self.lookup(n)).into());
+        s.set_url_segments(self.url_segments(&s.get_url()));
         if s.get_dirty() != dirty {
             s.set_dirty(dirty);
             self.refresh_tree();

@@ -20,7 +20,7 @@ use super::environments::environment_actions::EnvEditor;
 use super::send_flow::Delivery;
 use super::tabs::tab::Tab;
 use super::workspace_rules::{self, FlatRow};
-use crate::ui::{AppWindow, AuthFields, DialogKind, KvRow, WorkspaceState};
+use crate::ui::{AppWindow, AuthFields, DialogKind, KvRow, VarMode, WorkspaceState};
 
 /// Concrete types are wired in di.rs.
 pub struct Deps {
@@ -138,6 +138,13 @@ impl WorkspaceController {
         s.set_environments(strings(["No environment"]));
         s.set_environment_index(0);
         s.set_tree(ModelRc::default());
+        s.set_url_segments(ModelRc::default());
+        s.set_var_open(false);
+        s.set_var_name("".into());
+        s.set_var_value("".into());
+        s.set_var_mode(VarMode::Edit);
+        s.set_var_env("".into());
+        s.set_var_error("".into());
         s.set_banner_title("".into());
         s.set_banner_hint("".into());
         s.set_pretty(true);
@@ -172,6 +179,7 @@ impl WorkspaceController {
         s.set_env_rows(ModelRc::from(this.env_rows.clone()));
         s.set_env_show_secrets(false);
         s.set_env_dirty(false);
+        s.set_env_on_dotenv(false);
         s.set_env_notes(ModelRc::default());
         s.set_env_error("".into());
         this.clear_request(&s);
@@ -200,6 +208,16 @@ impl WorkspaceController {
         s.on_environment_selected(on(Self::environment_selected));
         s.on_changed(on(Self::changed));
         s.on_url_edited(on(Self::url_edited));
+        s.on_var_save(on(Self::var_save));
+        s.on_var_close(on(Self::var_close));
+        s.on_var_clicked({
+            let weak = weak.clone();
+            move |name| {
+                if let Some(c) = weak.upgrade() {
+                    c.var_clicked(name);
+                }
+            }
+        });
         s.on_curl_command({
             let weak = weak.clone();
             move || {
@@ -233,6 +251,7 @@ impl WorkspaceController {
         s.on_close_settings(on(Self::close_settings));
         s.on_open_environments(on(Self::open_environments));
         s.on_env_new(on(Self::env_new));
+        s.on_env_dotenv_selected(on(Self::env_dotenv_selected));
         s.on_env_duplicate(on(Self::env_duplicate));
         s.on_env_delete(on(Self::env_delete));
         s.on_env_changed(on(Self::env_changed));
