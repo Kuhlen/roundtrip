@@ -4,7 +4,9 @@ import { AuthFields } from "../../snippets/auth_form.slint";
 export enum SendStatus { idle, sending, done, failed, cancelled }
 export enum StatusClass { ok, warn, err }
 export enum KvTable { params, headers, form }
-export enum DialogKind { untitled, delete, clear-history }
+export enum DialogKind { untitled, delete, clear-history, environment-delete, environment-unsaved }
+// draft: New/Duplicate not saved yet
+export struct EnvListRow { name: string, personal: bool, draft: bool }
 export struct TabItem { title: string, dirty: bool, pinned: bool, active: bool, untitled: bool }
 // failed: the send ended in an error, status is "—"
 export struct HistoryRow { method: string, url: string, status: string, status-class: StatusClass, failed: bool, time: string }
@@ -124,6 +126,23 @@ export global WorkspaceState {
     in property <[string]> import-warnings;
     in property <string> import-error;
 
+    // environment dialog
+    in property <bool> envs-open;
+    in property <string> envs-title;
+    // stored environments, then the draft
+    in property <[EnvListRow]> env-list;
+    // -1 = none
+    in property <int> env-index: -1;
+    in-out property <string> env-name;
+    // 0 = Shared, 1 = Personal
+    in-out property <int> env-scope-index;
+    // last row is the placeholder
+    in property <[KvRow]> env-rows;
+    in-out property <bool> env-show-secrets;
+    in property <bool> env-dirty;
+    in property <[string]> env-notes;
+    in property <string> env-error;
+
     out property <bool> can-send: self.has-request && self.send-status != SendStatus.sending && self.unsupported-body == "" && self.unsupported-protocol == "" && !self.auth-blocked && self.body-error == "";
 
     callback open-collection();
@@ -185,4 +204,20 @@ export global WorkspaceState {
     callback history-clicked(int);
     callback history-clear();
     callback confirm-clear-history();
+    callback open-environments();
+    // int = env-list index
+    callback env-selected(int);
+    callback env-new();
+    callback env-duplicate();
+    callback env-delete();
+    callback env-edited(int);
+    callback env-removed(int);
+    // name or scope edited
+    callback env-changed();
+    callback env-save();
+    callback env-cancel();
+    callback env-close();
+    callback confirm-env-save();
+    callback confirm-env-discard();
+    callback confirm-env-delete();
 }

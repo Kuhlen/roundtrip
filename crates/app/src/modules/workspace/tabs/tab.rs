@@ -185,6 +185,7 @@ impl ResponseView {
                         key: h.key.into(),
                         value: h.value.into(),
                         file: false,
+                        secret: false,
                     })
                     .collect(),
                 ..Self::default()

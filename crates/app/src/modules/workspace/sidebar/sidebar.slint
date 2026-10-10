@@ -217,12 +217,41 @@ export component Sidebar inherits Rectangle {
                 }
             }
             Text { text: "ENVIRONMENT"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; }
-            Select {
-                model: WorkspaceState.environments;
-                current-index <=> WorkspaceState.environment-index;
-                font-weight: 500;
-                enabled: WorkspaceState.has-collection;
-                selected => { WorkspaceState.environment-selected(); }
+            HorizontalLayout {
+                spacing: 6px;
+                Select {
+                    horizontal-stretch: 1;
+                    model: WorkspaceState.environments;
+                    current-index <=> WorkspaceState.environment-index;
+                    font-weight: 500;
+                    enabled: WorkspaceState.has-collection;
+                    selected => { WorkspaceState.environment-selected(); }
+                }
+                Rectangle {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    background: edit.has-hover && WorkspaceState.has-collection ? Theme.raised : transparent;
+                    opacity: WorkspaceState.has-collection ? 1 : 0.45;
+                    accessible-role: button;
+                    accessible-label: "Edit environments";
+                    accessible-enabled: WorkspaceState.has-collection;
+                    accessible-action-default => {
+                        if WorkspaceState.has-collection {
+                            WorkspaceState.open-environments();
+                        }
+                    }
+                    Image {
+                        source: @image-url("../../../../assets/icons/edit.svg");
+                        colorize: Theme.muted;
+                    }
+                    edit := TouchArea {
+                        enabled: WorkspaceState.has-collection;
+                        clicked => { WorkspaceState.open-environments(); }
+                    }
+                }
             }
         }
         if !WorkspaceState.show-history: Rectangle { height: 1px; background: Theme.line-soft; }

@@ -1,4 +1,5 @@
 mod auth_fields;
+pub mod environments;
 pub mod history;
 mod import;
 mod request;

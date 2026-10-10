@@ -6,6 +6,9 @@ import { Btn } from "../../widgets/btn.slint";
 export component ConfirmDialog inherits Rectangle {
     property <bool> is-delete: WorkspaceState.dialog-kind == DialogKind.delete;
     property <bool> is-clear: WorkspaceState.dialog-kind == DialogKind.clear-history;
+    property <bool> is-untitled: WorkspaceState.dialog-kind == DialogKind.untitled;
+    property <bool> is-env-delete: WorkspaceState.dialog-kind == DialogKind.environment-delete;
+    property <bool> is-env-unsaved: WorkspaceState.dialog-kind == DialogKind.environment-unsaved;
     background: Theme.scrim;
     // scrim swallows clicks
     TouchArea { }
@@ -36,6 +39,10 @@ export component ConfirmDialog inherits Rectangle {
                 Text {
                     text: root.is-clear
                         ? "Clear all history?"
+                        : root.is-env-delete
+                        ? "Delete environment \"" + WorkspaceState.confirm-name + "\"?"
+                        : root.is-env-unsaved
+                        ? "Save changes to \"" + WorkspaceState.confirm-name + "\"?"
                         : root.is-delete
                         ? "Delete \"" + WorkspaceState.confirm-name + "\"?"
                         : "Save \"" + WorkspaceState.confirm-name + "\" before closing?";
@@ -47,6 +54,10 @@ export component ConfirmDialog inherits Rectangle {
                 Text {
                     text: root.is-clear
                         ? "All history is removed, not only the entries shown. This cannot be undone."
+                        : root.is-env-delete
+                        ? "This deletes its file permanently. Secret values no other environment uses are removed from .apiark/.env."
+                        : root.is-env-unsaved
+                        ? "Your edits to this environment are lost if you discard them."
                         : root.is-delete
                         ? "This deletes " + WorkspaceState.confirm-file + (WorkspaceState.confirm-folder ? " and everything in it" : "") + " permanently."
                         : "This request is in no collection yet. Its edits are lost if you discard them.";
@@ -72,15 +83,30 @@ export component ConfirmDialog inherits Rectangle {
                         text-color: Theme.err;
                         clicked => { WorkspaceState.confirm-delete(); }
                     }
-                    if !root.is-delete && !root.is-clear: Btn {
+                    if root.is-untitled: Btn {
                         text: "Discard";
                         text-color: Theme.err;
                         clicked => { WorkspaceState.confirm-discard(); }
                     }
-                    if !root.is-delete && !root.is-clear: Btn {
+                    if root.is-untitled: Btn {
                         text: "Save as…";
                         primary: true;
                         clicked => { WorkspaceState.confirm-save-as(); }
+                    }
+                    if root.is-env-delete: Btn {
+                        text: "Delete";
+                        text-color: Theme.err;
+                        clicked => { WorkspaceState.confirm-env-delete(); }
+                    }
+                    if root.is-env-unsaved: Btn {
+                        text: "Discard";
+                        text-color: Theme.err;
+                        clicked => { WorkspaceState.confirm-env-discard(); }
+                    }
+                    if root.is-env-unsaved: Btn {
+                        text: "Save";
+                        primary: true;
+                        clicked => { WorkspaceState.confirm-env-save(); }
                     }
                 }
             }

@@ -14,7 +14,7 @@ use app::ui::{AppWindow, KvRow, WorkspaceState};
 use domain::AppError;
 use domain::auth::Auth;
 use domain::collection::{Collection, CollectionStore, Node, Protocol};
-use domain::environment::{Environment, EnvironmentStore, Scope};
+use domain::environment::{Environment, EnvironmentStore, Scope, Variable};
 use domain::history::{HistoryEntry, HistoryStore};
 use domain::http::{Body, CancelFlag, HttpSender, KeyValue, Method, Request, Response, TextKind};
 use domain::import::{ExportReport, ImportedCollection};
@@ -371,9 +371,70 @@ fn rebase(node: &mut Node, old: &Path, new: &Path) {
     }
 }
 
-#[derive(Default)]
+/// (old name and scope, saved value)
+pub type SavedEnvironment = (Option<(String, Scope)>, Environment);
+
 pub struct FakeEnvironments {
     pub list_error: RefCell<Option<AppError>>,
+    /// per collection root, list order; unknown roots read ROOT's
+    pub envs: RefCell<HashMap<PathBuf, Vec<Environment>>>,
+    pub saves: RefCell<Vec<SavedEnvironment>>,
+    pub deletes: RefCell<Vec<(String, Scope)>>,
+    pub save_error: RefCell<Option<AppError>>,
+}
+
+fn fake_env(name: &str, scope: Scope, vars: &[(&str, &str, bool)]) -> Environment {
+    Environment {
+        name: name.into(),
+        scope,
+        variables: vars
+            .iter()
+            .map(|(k, v, secret)| Variable {
+                key: (*k).into(),
+                value: (*v).into(),
+                secret: *secret,
+            })
+            .collect(),
+    }
+}
+
+impl Default for FakeEnvironments {
+    fn default() -> Self {
+        let envs = HashMap::from([
+            (
+                PathBuf::from(ROOT),
+                vec![
+                    fake_env(
+                        "dev",
+                        Scope::Shared,
+                        &[
+                            ("baseUrl", "https://httpbin.org", false),
+                            ("token", "secret", true),
+                        ],
+                    ),
+                    fake_env("mine", Scope::Personal, &[]),
+                ],
+            ),
+            (
+                PathBuf::from(ORDERS),
+                vec![
+                    fake_env("qa", Scope::Shared, &[]),
+                    fake_env(
+                        "dev",
+                        Scope::Shared,
+                        &[("baseUrl", "https://orders.test", false)],
+                    ),
+                ],
+            ),
+        ]);
+        Self {
+            list_error: RefCell::default(),
+            envs: RefCell::new(envs),
+            saves: RefCell::default(),
+            deletes: RefCell::default(),
+            save_error: RefCell::default(),
+        }
+    }
 }
 
 impl EnvironmentStore for FakeEnvironments {
@@ -381,37 +442,52 @@ impl EnvironmentStore for FakeEnvironments {
         if let Some(e) = self.list_error.borrow().clone() {
             return Err(e);
         }
-        let env = |name: &str, scope| Environment {
-            name: name.into(),
-            scope,
-            variables: HashMap::new(),
-            secrets: vec![],
-        };
-        if collection == Path::new(ORDERS) {
-            return Ok(vec![env("qa", Scope::Shared), env("dev", Scope::Shared)]);
-        }
-        Ok(vec![
-            env("dev", Scope::Shared),
-            env("mine", Scope::Personal),
-        ])
+        let envs = self.envs.borrow();
+        Ok(envs
+            .get(collection)
+            .or_else(|| envs.get(Path::new(ROOT)))
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn resolve(&self, collection: &Path, name: &str) -> Result<HashMap<String, String>, AppError> {
-        if collection == Path::new(ORDERS) {
-            return Ok(match name {
-                "dev" => {
-                    HashMap::from([("baseUrl".to_string(), "https://orders.test".to_string())])
-                }
-                _ => HashMap::new(),
-            });
+        Ok(self
+            .list(collection)?
+            .iter()
+            .find(|e| e.name == name)
+            .map(|e| domain::environment::resolve(HashMap::new(), e))
+            .unwrap_or_default())
+    }
+
+    fn save(
+        &self,
+        collection: &Path,
+        old: Option<(&str, Scope)>,
+        env: &Environment,
+    ) -> Result<(), AppError> {
+        if let Some(e) = self.save_error.borrow().clone() {
+            return Err(e);
         }
-        Ok(match name {
-            "dev" => HashMap::from([
-                ("baseUrl".to_string(), "https://httpbin.org".to_string()),
-                ("token".to_string(), "secret".to_string()),
-            ]),
-            _ => HashMap::new(),
-        })
+        self.saves
+            .borrow_mut()
+            .push((old.map(|(n, s)| (n.to_owned(), s)), env.clone()));
+        let mut all = self.envs.borrow_mut();
+        let list = all.entry(collection.to_path_buf()).or_default();
+        match old.and_then(|(n, s)| list.iter().position(|e| e.name == n && e.scope == s)) {
+            Some(i) => list[i] = env.clone(),
+            None => list.push(env.clone()),
+        }
+        // the real store lists sorted by name
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(())
+    }
+
+    fn delete(&self, collection: &Path, name: &str, scope: Scope) -> Result<(), AppError> {
+        self.deletes.borrow_mut().push((name.to_owned(), scope));
+        if let Some(list) = self.envs.borrow_mut().get_mut(collection) {
+            list.retain(|e| !(e.name == name && e.scope == scope));
+        }
+        Ok(())
     }
 }
 

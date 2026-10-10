@@ -287,6 +287,12 @@ pub fn error_text(e: &AppError, root: Option<&Path>) -> (String, String) {
                 "Use a non-empty name that does not start with a dot and is not _folder.".into(),
             );
         }
+        AppError::DuplicateKey(key) => {
+            return (
+                format!("Duplicate key \"{key}\""),
+                "Each variable key can appear once.".into(),
+            );
+        }
         AppError::File(path) if path.is_empty() => {
             ("No file chosen".into(), "Pick a file in the Body tab.")
         }

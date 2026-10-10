@@ -8,6 +8,7 @@ export component Field inherits Rectangle {
     in property <bool> framed: true;
     // disabled key/value row; Text has no strikethrough, so draw one
     in property <bool> struck;
+    in property <InputType> input-type <=> input.input-type;
     callback edited();
     callback accepted();
     out property <bool> has-focus: input.has-focus;

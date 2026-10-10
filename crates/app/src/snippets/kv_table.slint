@@ -4,7 +4,8 @@ import { Checkbox } from "../widgets/checkbox.slint";
 import { Field } from "../widgets/field.slint";
 
 // last row is the placeholder; typing into it adds a row
-export struct KvRow { enabled: bool, key: string, value: string, file: bool }
+// secret: environment variables only, value lives in .apiark/.env
+export struct KvRow { enabled: bool, key: string, value: string, file: bool, secret: bool }
 
 export component KvTableView inherits Rectangle {
     in property <[KvRow]> rows;
@@ -12,6 +13,9 @@ export component KvTableView inherits Rectangle {
     callback removed(int);
     in property <bool> file-column;
     callback pick-file(int);
+    // environment table: no enabled flag, a Secret/Plain label instead
+    in property <bool> secret-column;
+    in property <bool> show-secrets;
     // ListView's own preferred height is tiny; ask for every row, shrink only when space runs out
     preferred-height: (root.rows.length + 1) * 32px + 2px;
     max-height: self.preferred-height;
@@ -25,7 +29,7 @@ export component KvTableView inherits Rectangle {
             height: 32px;
             background: Theme.surface;
             HorizontalLayout {
-                Rectangle { width: 30px; }
+                Rectangle { width: root.secret-column ? 0px : 30px; }
                 // same 10 px inset as the Field cells below
                 HorizontalLayout {
                     horizontal-stretch: 10;
@@ -38,6 +42,7 @@ export component KvTableView inherits Rectangle {
                     Text { text: "VALUE"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
                 }
                 if root.file-column: Rectangle { width: 52px; }
+                if root.secret-column: Rectangle { width: 64px; }
                 Rectangle { width: 28px; }
             }
         }
@@ -56,8 +61,8 @@ export component KvTableView inherits Rectangle {
                 }
                 HorizontalLayout {
                     Rectangle {
-                        width: 30px;
-                        if !line.is-last: Checkbox {
+                        width: root.secret-column ? 0px : 30px;
+                        if !line.is-last && !root.secret-column: Checkbox {
                             x: 8px;
                             y: 9px;
                             checked <=> row.enabled;
@@ -79,6 +84,7 @@ export component KvTableView inherits Rectangle {
                             framed: false;
                             text <=> row.value;
                             placeholder: root.file-column && row.file ? "Path or {{var}}" : "Value";
+                            input-type: root.secret-column && row.secret && !root.show-secrets ? InputType.password : InputType.text;
                             struck: !row.enabled;
                             edited => { root.edited(i); }
                         }
@@ -109,6 +115,24 @@ export component KvTableView inherits Rectangle {
                             enabled: !line.is-last;
                             clicked => {
                                 row.file = !row.file;
+                                root.edited(i);
+                            }
+                        }
+                    }
+                    // a label, like File/Text: the bundled fonts have no lock glyph
+                    if root.secret-column: Rectangle {
+                        width: 64px;
+                        if !line.is-last: Text {
+                            text: row.secret ? "Secret" : "Plain";
+                            font-size: 11px;
+                            color: row.secret ? Theme.warn : secret-toggle.has-hover ? Theme.text : Theme.muted;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        secret-toggle := TouchArea {
+                            enabled: !line.is-last;
+                            clicked => {
+                                row.secret = !row.secret;
                                 root.edited(i);
                             }
                         }

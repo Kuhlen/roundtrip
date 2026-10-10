@@ -412,7 +412,7 @@ pub(crate) fn set_auth(doc: &mut Mapping, auth: Option<&Auth>) {
     doc.insert("auth".into(), Value::Mapping(map));
 }
 
-fn read_doc(file: &Path) -> Result<Mapping, AppError> {
+pub(crate) fn read_doc(file: &Path) -> Result<Mapping, AppError> {
     serde_yaml::from_str(&read_checked(file)?).map_err(|e| invalid(file, e))
 }
 

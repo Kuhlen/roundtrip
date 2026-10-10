@@ -10,6 +10,9 @@ it does not understand yet. You can switch back to ApiArk at any time.
 ## Features
 
 - Open a collection, browse the tree, pick an environment (remembered between runs).
+- Edit environments with the pencil button next to the environment picker: create, duplicate, rename, delete, move
+  between Shared and Personal (`.apiark/environments.local/`, gitignored). A Secret variable keeps
+  its value in `.apiark/.env` (gitignored, masked in the table) instead of the YAML file.
 - Edit method, URL, params, headers; `{{var}}` and `{{$uuid}}`-style variables.
 - Bodies: JSON, XML, raw, urlencoded and form-data (a table; form-data rows can be files), binary
   (a file), and GraphQL (Query, Variables, Operation name). `…` / "Choose file…" store a path
@@ -38,7 +41,7 @@ it does not understand yet. You can switch back to ApiArk at any time.
 
 - YAML comments are lost on save.
 - Disabled and blank-key params/headers are not stored (ApiArk maps have no enabled flag); duplicate keys collapse.
-- A personal environment with the same name as a shared one is shadowed.
+- A personal environment with the same name as a shared one (made outside Roundtrip) is shadowed; the editor refuses such names.
 - No file watcher: external edits after loading are overwritten on save.
 - Every request uses the first collection's environment, as in ApiArk.
 - Folder auth in _folder.yaml is ignored when sending (ApiArk does the same).
@@ -46,6 +49,9 @@ it does not understand yet. You can switch back to ApiArk at any time.
 - ApiArk sends a binary body's path as text, not the file.
 - The history list shows the newest 50 entries; search to reach older ones. Responses are not kept.
 - A reopened history entry carries the auth its collection had at send time (secrets redacted), not Inherit.
+- A secret key has one value per collection: environments that both mark `token` secret share it.
+- Once saved, secret variables are listed after the others.
+- The root `.env` file is not editable in the app.
 
 ## Build
 

@@ -142,6 +142,7 @@ fn save_writes_the_form_and_clears_dirty() {
             key: "X-Debug".into(),
             value: "1".into(),
             file: false,
+            secret: false,
         },
     );
     s.invoke_kv_edited(KvTable::Headers, 0);
@@ -184,6 +185,7 @@ fn typing_into_placeholder_appends_row_and_remove_drops_it() {
             key: "limit".into(),
             value: "".into(),
             file: false,
+            secret: false,
         },
     );
     s.invoke_kv_edited(KvTable::Params, 1);
@@ -212,6 +214,7 @@ fn disabled_param_is_not_counted_or_resolved() {
             key: "page".into(),
             value: "2".into(),
             file: false,
+            secret: false,
         },
     );
     s.invoke_kv_edited(KvTable::Params, 0);

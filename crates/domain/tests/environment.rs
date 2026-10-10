@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use domain::environment::{Environment, Scope, resolve};
+use domain::AppError;
+use domain::environment::{Environment, Scope, Variable, resolve, validate};
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs
@@ -9,35 +10,80 @@ fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         .collect()
 }
 
-fn env(variables: &[(&str, &str)], secrets: &[&str]) -> Environment {
+fn var(key: &str, value: &str) -> Variable {
+    Variable {
+        key: key.into(),
+        value: value.into(),
+        secret: false,
+    }
+}
+
+fn env(name: &str, scope: Scope, variables: Vec<Variable>) -> Environment {
     Environment {
-        name: "dev".into(),
-        scope: Scope::Shared,
-        variables: map(variables),
-        secrets: secrets.iter().map(|s| s.to_string()).collect(),
+        name: name.into(),
+        scope,
+        variables,
     }
 }
 
 // parity: apiark storage/environment.rs get_resolved_variables
 #[test]
-fn merge_priority_root_then_env_then_secrets() {
+fn environment_overrides_root_dotenv() {
     let vars = resolve(
         map(&[("host", "root"), ("only_root", "r")]),
-        &env(&[("host", "env"), ("token", "env")], &["token"]),
-        &map(&[("token", "secret")]),
+        &env(
+            "dev",
+            Scope::Shared,
+            vec![var("host", "env"), var("token", "t")],
+        ),
     );
     assert_eq!(
         vars,
-        map(&[("host", "env"), ("token", "secret"), ("only_root", "r")])
+        map(&[("host", "env"), ("token", "t"), ("only_root", "r")])
     );
 }
 
 #[test]
-fn secrets_not_listed_are_ignored() {
-    let vars = resolve(
-        HashMap::new(),
-        &env(&[("a", "1")], &[]),
-        &map(&[("a", "leak"), ("b", "leak")]),
+fn validate_trims_name_and_drops_blank_keys() {
+    let got = validate(
+        env(
+            " dev ",
+            Scope::Shared,
+            vec![var("a", "1"), var(" ", "lost"), var(" b ", "2")],
+        ),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        got,
+        env("dev", Scope::Shared, vec![var("a", "1"), var("b", "2")])
     );
-    assert_eq!(vars, map(&[("a", "1")]));
+}
+
+#[test]
+fn validate_rejects_blank_name() {
+    assert_eq!(
+        validate(env("  ", Scope::Shared, vec![]), &[]),
+        Err(AppError::InvalidName(String::new()))
+    );
+}
+
+#[test]
+fn validate_rejects_a_name_used_in_either_scope() {
+    let others = [env("dev", Scope::Personal, vec![])];
+    assert_eq!(
+        validate(env("dev", Scope::Shared, vec![]), &others),
+        Err(AppError::AlreadyExists("dev".into()))
+    );
+}
+
+#[test]
+fn validate_rejects_duplicate_key() {
+    assert_eq!(
+        validate(
+            env("dev", Scope::Shared, vec![var("a", "1"), var("a", "2")]),
+            &[]
+        ),
+        Err(AppError::DuplicateKey("a".into()))
+    );
 }

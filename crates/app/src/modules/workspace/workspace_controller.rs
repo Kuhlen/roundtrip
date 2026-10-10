@@ -16,6 +16,7 @@ use domain::import::{ExportReport, ImportedCollection};
 use domain::session::SessionStore;
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, VecModel};
 
+use super::environments::environment_actions::EnvEditor;
 use super::send_flow::Delivery;
 use super::tabs::tab::Tab;
 use super::workspace_rules::{self, FlatRow};
@@ -82,6 +83,9 @@ pub struct WorkspaceController {
     pub(super) pending: RefCell<Option<PendingAction>>,
     // read file waiting in the import dialog
     pub(super) pending_import: RefCell<Option<ImportedCollection>>,
+    // open environment dialog
+    pub(super) env_editor: RefCell<Option<EnvEditor>>,
+    pub(super) env_rows: Rc<VecModel<KvRow>>,
     // row in rename mode
     pub(super) editing: RefCell<Option<PathBuf>>,
     pub(super) params: Rc<VecModel<KvRow>>,
@@ -113,6 +117,8 @@ impl WorkspaceController {
             history_ids: RefCell::default(),
             pending: RefCell::default(),
             pending_import: RefCell::default(),
+            env_editor: RefCell::default(),
+            env_rows: Rc::new(VecModel::default()),
             editing: RefCell::default(),
             params: Rc::new(VecModel::default()),
             headers: Rc::new(VecModel::default()),
@@ -157,6 +163,17 @@ impl WorkspaceController {
         s.set_import_counts("".into());
         s.set_import_warnings(ModelRc::default());
         s.set_import_error("".into());
+        s.set_envs_open(false);
+        s.set_envs_title("".into());
+        s.set_env_list(ModelRc::default());
+        s.set_env_index(-1);
+        s.set_env_name("".into());
+        s.set_env_scope_index(0);
+        s.set_env_rows(ModelRc::from(this.env_rows.clone()));
+        s.set_env_show_secrets(false);
+        s.set_env_dirty(false);
+        s.set_env_notes(ModelRc::default());
+        s.set_env_error("".into());
         this.clear_request(&s);
         this.push_tabs();
         this.wire(&s);
@@ -214,6 +231,19 @@ impl WorkspaceController {
         s.on_open_settings(on(Self::open_settings));
         s.on_save_settings(on(Self::save_settings));
         s.on_close_settings(on(Self::close_settings));
+        s.on_open_environments(on(Self::open_environments));
+        s.on_env_new(on(Self::env_new));
+        s.on_env_duplicate(on(Self::env_duplicate));
+        s.on_env_delete(on(Self::env_delete));
+        s.on_env_changed(on(Self::env_changed));
+        s.on_env_save(on(|c| {
+            c.env_save();
+        }));
+        s.on_env_cancel(on(Self::env_cancel));
+        s.on_env_close(on(Self::env_close));
+        s.on_confirm_env_save(on(Self::confirm_env_save));
+        s.on_confirm_env_discard(on(Self::confirm_env_discard));
+        s.on_confirm_env_delete(on(Self::confirm_env_delete));
         let on_index = |f: fn(&Self, i32)| {
             let weak = weak.clone();
             move |i: i32| {
@@ -223,6 +253,9 @@ impl WorkspaceController {
             }
         };
         s.on_row_clicked(on_index(Self::row_clicked));
+        s.on_env_selected(on_index(Self::env_selected));
+        s.on_env_edited(on_index(Self::env_edited));
+        s.on_env_removed(on_index(Self::env_removed));
         s.on_history_clicked(on_index(Self::open_history));
         s.on_tab_clicked(on_index(|c, i| {
             if let Some(id) = c.tab_id(i) {
@@ -366,6 +399,11 @@ impl WorkspaceController {
         let ui = self.ui();
         let s = ui.global::<WorkspaceState>();
         if s.get_confirm_open() || s.get_save_as_open() || s.get_settings_open() {
+            return CloseRequestResponse::KeepWindowShown;
+        }
+        // same as the dialog's Close: asks when dirty; the next close quits
+        if s.get_envs_open() {
+            self.env_close();
             return CloseRequestResponse::KeepWindowShown;
         }
         let ids = self.tabs.borrow().iter().map(|t| t.id).collect();

@@ -1,0 +1,185 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../../../theme.slint";
+import { WorkspaceState } from "../workspace_state.slint";
+import { Btn } from "../../../widgets/btn.slint";
+import { Field } from "../../../widgets/field.slint";
+import { Select } from "../../../widgets/select.slint";
+import { Toggle } from "../../../widgets/toggle.slint";
+import { KvTableView } from "../../../snippets/kv_table.slint";
+
+// modal; Save/Cancel per environment, leaving unsaved edits asks first
+export component EnvironmentDialog inherits Rectangle {
+    property <bool> selected: WorkspaceState.env-index >= 0 && WorkspaceState.env-index < WorkspaceState.env-list.length;
+    property <bool> on-draft: root.selected && WorkspaceState.env-list[WorkspaceState.env-index].draft;
+    // focus dies with the closed confirm dialog; Esc needs it back
+    property <bool> asking: WorkspaceState.confirm-open;
+    changed asking => {
+        if !self.asking {
+            keys.focus();
+        }
+    }
+    background: Theme.scrim;
+    // scrim swallows clicks
+    TouchArea { }
+    keys := FocusScope {
+        width: 100%;
+        height: 100%;
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                WorkspaceState.env-close();
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: 760px;
+            height: 480px;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.line;
+            border-radius: 10px;
+            drop-shadow-blur: 24px;
+            drop-shadow-offset-y: 12px;
+            drop-shadow-color: #00000080;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                Text { text: WorkspaceState.envs-title; font-size: 15px; font-weight: 600; color: Theme.text; }
+                HorizontalLayout {
+                    vertical-stretch: 1;
+                    spacing: 16px;
+                    VerticalLayout {
+                        width: 220px;
+                        spacing: 8px;
+                        Rectangle {
+                            vertical-stretch: 1;
+                            border-width: 1px;
+                            border-color: Theme.line-soft;
+                            border-radius: 6px;
+                            clip: true;
+                            ListView {
+                                for row[i] in WorkspaceState.env-list: Rectangle {
+                                    height: 30px;
+                                    background: i == WorkspaceState.env-index ? Theme.accent-soft : item.has-hover ? Theme.raised : transparent;
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        spacing: 6px;
+                                        Text { text: row.name; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                        if row.personal: Text { text: "personal"; font-size: 10px; color: Theme.warn; vertical-alignment: center; }
+                                        if row.draft: Text { text: "●"; font-size: 10px; color: Theme.accent; vertical-alignment: center; }
+                                    }
+                                    item := TouchArea {
+                                        clicked => { WorkspaceState.env-selected(i); }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Btn {
+                                text: "+ New";
+                                small: true;
+                                clicked => { WorkspaceState.env-new(); }
+                            }
+                            Btn {
+                                text: "Duplicate";
+                                small: true;
+                                ghost: true;
+                                enabled: root.selected && !root.on-draft;
+                                clicked => { WorkspaceState.env-duplicate(); }
+                            }
+                            Btn {
+                                text: "Delete";
+                                small: true;
+                                ghost: true;
+                                text-color: Theme.err;
+                                enabled: root.selected && !root.on-draft;
+                                clicked => { WorkspaceState.env-delete(); }
+                            }
+                        }
+                    }
+                    if !root.selected: VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Text {
+                            text: "No environments yet. Create one with + New.";
+                            color: Theme.muted;
+                            horizontal-alignment: center;
+                        }
+                    }
+                    if root.selected: VerticalLayout {
+                        horizontal-stretch: 1;
+                        // short table: slack goes below, not between rows
+                        alignment: start;
+                        spacing: 10px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Field {
+                                horizontal-stretch: 1;
+                                text <=> WorkspaceState.env-name;
+                                placeholder: "Name";
+                                edited => { WorkspaceState.env-changed(); }
+                            }
+                            Select {
+                                width: 130px;
+                                model: ["Shared", "Personal"];
+                                current-index <=> WorkspaceState.env-scope-index;
+                                selected => { WorkspaceState.env-changed(); }
+                            }
+                        }
+                        HorizontalLayout {
+                            Text { text: "VARIABLES"; font-size: 11px; letter-spacing: 0.66px; color: Theme.faint; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Toggle {
+                                text: "Show secrets";
+                                checked <=> WorkspaceState.env-show-secrets;
+                            }
+                        }
+                        KvTableView {
+                            vertical-stretch: 1;
+                            rows: WorkspaceState.env-rows;
+                            secret-column: true;
+                            show-secrets: WorkspaceState.env-show-secrets;
+                            edited(i) => { WorkspaceState.env-edited(i); }
+                            removed(i) => { WorkspaceState.env-removed(i); }
+                        }
+                        for note in WorkspaceState.env-notes: Text {
+                            text: note;
+                            font-size: 12px;
+                            color: Theme.muted;
+                            wrap: word-wrap;
+                        }
+                        if WorkspaceState.env-error != "": Text {
+                            text: WorkspaceState.env-error;
+                            color: Theme.err;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Btn {
+                        text: "Close";
+                        ghost: true;
+                        clicked => { WorkspaceState.env-close(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Btn {
+                        text: "Cancel";
+                        ghost: true;
+                        enabled: WorkspaceState.env-dirty;
+                        clicked => { WorkspaceState.env-cancel(); }
+                    }
+                    Btn {
+                        text: "Save";
+                        primary: true;
+                        enabled: WorkspaceState.env-dirty;
+                        clicked => { WorkspaceState.env-save(); }
+                    }
+                }
+            }
+        }
+    }
+    init => { keys.focus(); }
+}

@@ -3,3 +3,5 @@
 mod body_fields;
 mod curl_flow;
 mod request_form;
+
+pub(crate) use request_form::{grow_rows, placeholder, remove_row};

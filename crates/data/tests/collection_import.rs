@@ -91,7 +91,8 @@ fn written_collection_loads_back_in_order() {
     assert_eq!(create.headers, vec![KeyValue::new("X-Trace", "1")]);
     let envs = EnvironmentDir.list(&root).unwrap();
     assert_eq!(envs[0].name, "Collection Variables");
-    assert_eq!(envs[0].variables["baseUrl"], "https://shop.test");
+    let base = envs[0].variables.iter().find(|v| v.key == "baseUrl");
+    assert_eq!(base.map(|v| v.value.as_str()), Some("https://shop.test"));
     assert_eq!(
         fs::read_to_string(root.join(".apiark/.gitignore")).unwrap(),
         ".env\n"

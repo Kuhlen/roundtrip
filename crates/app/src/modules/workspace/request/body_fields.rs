@@ -28,6 +28,7 @@ impl WorkspaceController {
             key: key.into(),
             value: value.into(),
             file,
+            secret: false,
         };
         let mut rows = Vec::new();
         match body {

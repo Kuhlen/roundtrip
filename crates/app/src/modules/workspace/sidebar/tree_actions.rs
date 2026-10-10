@@ -1,12 +1,10 @@
-//! Collections, environments and tree: what is open and which request is active.
+//! Collections and tree: what is open and which request is active.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use domain::collection::{Collection, Node};
-use domain::environment::Scope;
 use domain::http::Method;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::modules::workspace::workspace_controller::{
     PendingAction, WorkspaceController, strings,
@@ -129,64 +127,6 @@ impl WorkspaceController {
         if let Some(dir) = (self.deps.pick_dir)() {
             self.open_collection(&dir);
         }
-    }
-
-    pub(crate) fn load_environments(&self, preferred: Option<&str>) {
-        let Some(root) = self.env_root() else { return };
-        let envs = self.deps.environments.list(&root).unwrap_or_else(|e| {
-            self.banner(&e);
-            Vec::new()
-        });
-        let names: Vec<SharedString> = std::iter::once("No environment".into())
-            .chain(envs.iter().map(|e| match e.scope {
-                Scope::Shared => e.name.as_str().into(),
-                Scope::Personal => format!("{} (personal)", e.name).into(),
-            }))
-            .collect();
-        let index = preferred
-            .and_then(|p| envs.iter().position(|e| e.name == p))
-            .map_or(0, |i| i + 1);
-        let ui = self.ui();
-        let s = ui.global::<WorkspaceState>();
-        s.set_environments(ModelRc::new(VecModel::from(names)));
-        s.set_environment_index(index as i32);
-        *self.envs.borrow_mut() = envs;
-        self.refresh_vars();
-    }
-
-    pub(crate) fn active_environment(&self) -> Option<String> {
-        let index = self.ui().global::<WorkspaceState>().get_environment_index();
-        let i = usize::try_from(index).ok()?.checked_sub(1)?;
-        self.envs.borrow().get(i).map(|e| e.name.clone())
-    }
-
-    pub(crate) fn environment_selected(&self) {
-        self.refresh_vars();
-        self.save_session();
-        self.changed();
-    }
-
-    pub(crate) fn refresh_vars(&self) {
-        let vars = match (self.env_root(), self.active_environment()) {
-            (Some(root), Some(name)) => self
-                .deps
-                .environments
-                .resolve(&root, &name)
-                .unwrap_or_else(|e| {
-                    self.banner(&e);
-                    HashMap::new()
-                }),
-            _ => HashMap::new(),
-        };
-        *self.vars.borrow_mut() = vars;
-    }
-
-    pub(crate) fn lookup(&self, name: &str) -> Option<String> {
-        self.vars
-            .borrow()
-            .get(name)
-            .cloned()
-            .or_else(|| (self.deps.dynamic_var)(name))
     }
 
     pub(crate) fn refresh_tree(&self) {

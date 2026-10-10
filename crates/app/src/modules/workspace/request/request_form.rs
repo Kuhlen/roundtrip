@@ -189,25 +189,12 @@ impl WorkspaceController {
 
     /// Typing into the placeholder row turns it into a real row.
     pub(crate) fn kv_edited(&self, table: KvTable, index: i32) {
-        let model = self.kv_model(table);
-        let last = model.row_count().saturating_sub(1);
-        let filled_last = usize::try_from(index).is_ok_and(|i| i == last)
-            && model
-                .row_data(last)
-                .is_some_and(|r| !r.key.is_empty() || !r.value.is_empty());
-        if filled_last {
-            model.push(placeholder());
-        }
+        grow_rows(self.kv_model(table), index);
         self.changed();
     }
 
     pub(crate) fn kv_removed(&self, table: KvTable, index: i32) {
-        let model = self.kv_model(table);
-        if let Ok(i) = usize::try_from(index)
-            && i + 1 < model.row_count()
-        {
-            model.remove(i);
-        }
+        remove_row(self.kv_model(table), index);
         self.changed();
     }
 
@@ -259,6 +246,27 @@ pub(crate) fn placeholder() -> KvRow {
     }
 }
 
+/// Typing into the placeholder row turns it into a real row.
+pub(crate) fn grow_rows(model: &VecModel<KvRow>, index: i32) {
+    let last = model.row_count().saturating_sub(1);
+    let filled_last = usize::try_from(index).is_ok_and(|i| i == last)
+        && model
+            .row_data(last)
+            .is_some_and(|r| !r.key.is_empty() || !r.value.is_empty());
+    if filled_last {
+        model.push(placeholder());
+    }
+}
+
+/// The placeholder row stays.
+pub(crate) fn remove_row(model: &VecModel<KvRow>, index: i32) {
+    if let Ok(i) = usize::try_from(index)
+        && i + 1 < model.row_count()
+    {
+        model.remove(i);
+    }
+}
+
 fn with_placeholder(rows: &[KeyValue]) -> Vec<KvRow> {
     rows.iter()
         .map(|r| KvRow {
@@ -266,6 +274,7 @@ fn with_placeholder(rows: &[KeyValue]) -> Vec<KvRow> {
             key: r.key.as_str().into(),
             value: r.value.as_str().into(),
             file: false,
+            secret: false,
         })
         .chain(std::iter::once(placeholder()))
         .collect()
